@@ -110,26 +110,16 @@ function searchCorpus(corpus, terms, base) {
     const df = findDocs(corpus.blob, corpus.offs, t, hits);
     weights.set(t, { idf: Math.log2(N / (df + 1)), df });
   }
-  // Title-match priority: the source label of book docs embeds the book
-  // title (书籍:<title>), so a query that is a substring of a title (日月 /
-  // 日月前 / 日月前事…) boosts that book's title-card AND body docs above
-  // texts that merely mention the words. 10× keeps the tier decisive.
-  const TITLE_PREFIX = "书籍:";
-  const TITLE_BOOST = 10;
-  const titleHit = (doc, t) => {
-    const s = corpus.tbl.src[corpus.cols[1][doc]];
-    return s.startsWith(TITLE_PREFIX) &&
-      s.slice(TITLE_PREFIX.length).includes(t);
-  };
+  // Title matches now live in their own top section (renderTitleMatches);
+  // the game list keeps plain IDF ranking, with title-card docs suppressed
+  // there to avoid duplicating the title section.
   const results = [];
   for (const [doc, set] of hits) {
     const uniq = [...set];
     const aliasHits = uniq.filter((t) => t !== base);
     const strong = uniq.includes(base) || aliasHits.length >= 2 ||
       aliasHits.some((t) => weights.get(t).df <= 5);
-    const baseScore = uniq.reduce((a, t) => a + weights.get(t).idf, 0);
-    const boost = uniq.some((t) => titleHit(doc, t)) ? TITLE_BOOST : 1;
-    results.push({ doc, via: uniq, score: baseScore * boost, strong });
+    results.push({ doc, via: uniq, score: uniq.reduce((a, t) => a + weights.get(t).idf, 0), strong });
   }
   results.sort((a, b) => b.score - a.score || a.doc - b.doc);
   return { results, weights };
@@ -168,11 +158,47 @@ function highlightInto(node, text, terms, window) {
   if (end < text.length) node.append("…");
 }
 
+function renderTitleSection(q) {
+  // Dedicated top section: books whose title contains the query, straight
+  // from the embedded source labels (书籍:<title>) — every joined volume,
+  // regardless of whether its body text mentions the query at all.
+  const sec = document.getElementById("titles-sec");
+  const box = document.getElementById("titles");
+  box.replaceChildren();
+  const PREFIX = "书籍:";
+  const UNRESOLVED = /^[A-Za-z]+\d/; // BookNNN/WeaponNNN… = title not joined back
+  const seen = new Set();
+  const matches = [];
+  (state.g.tbl.src || []).forEach((s, i) => {
+    if (!s.startsWith(PREFIX)) return;
+    const title = s.slice(PREFIX.length);
+    if (UNRESOLVED.test(title) || !title.includes(q) || seen.has(title)) return;
+    seen.add(title);
+    matches.push({ title, url: (state.g.tbl.src_url || [])[i] || "" });
+  });
+  if (!matches.length) { sec.hidden = true; return; }
+  matches.sort((a, b) => a.title.localeCompare(b.title, "zh"));
+  sec.hidden = false;
+  box.append(el("h3", null, `书名含「${q}」 · ${matches.length} 本`));
+  for (const m of matches) {
+    const card = el("div", "card");
+    card.append(el("div", "title-line", `《${m.title}》`));
+    if (m.url) {
+      const a = el("a", "link", "跳转原文");
+      a.href = m.url; a.target = "_blank"; a.rel = "noopener";
+      card.append(a);
+    }
+    box.append(card);
+  }
+}
+
 function renderGame(results, terms) {
   const box = document.getElementById("strong");
   const weakBox = document.getElementById("weak");
   box.replaceChildren(); weakBox.replaceChildren();
   const g = state.g;
+  // title-card docs are represented by the 书名匹配 section, not here
+  results = results.filter((r) => g.tbl.ty[g.cols[0][r.doc]] !== "book_title");
   const seenBodies = new Set();
   const dedup = (rs) => rs.filter((r) => {
     const text = g.blob.slice(g.offs[r.doc], g.offs[r.doc + 1] - 1);
@@ -240,12 +266,13 @@ function renderSocial(results) {
 
 async function runSearch(rawQ) {
   const q = rawQ.trim();
-  if (!q) return;
+  if (!q || !state.g) return; // ignore until corpora are actually loaded
   const useAlias = document.getElementById("usealias").checked;
   let terms = [q];
   const entry = state.meta.aliases.find((a) => a.term === q);
   if (entry && useAlias) terms = [q, ...entry.aliases];
   const t0 = performance.now();
+  renderTitleSection(q);
   const { results, weights } = searchCorpus(state.g, terms, q);
   renderGame(results, terms);
   const soc = searchCorpus(state.s, [q], q);
