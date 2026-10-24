@@ -9,7 +9,16 @@
 - Netlify PAT 在仓库根 `.netlify_token`（已 gitignore），名为 deploy-cli，**2026-11-01 过期**；续期：app.netlify.com/user/applications#personal-access-tokens 建新 token 覆盖该文件。
 - 可选升级（一次性）：Netlify 控制台把仓库直接挂到项目做"推即部署"（控制台 UI 的 Import from Git 流程；本次 API 挂仓在 Netlify 新版上不开放，未做成，不影响现管线）。
 
-## 下次开干：观测枢接入（用户已定向，2026-10-25）
+## 观测枢接入（M4.6，2026-10-25 完成第一期：书籍）
+接口已逆向（scripts/obc_probe.py 头部注释有全部端点；关键参数 app_sn=ys_obc，请求须带 UA+Referer/Origin 否则 403）：
+- 频道树 getChannelTree → 「书籍」频道 id=68，共 93 个词条（=站点渲染数，无翻页）。
+- 词条详情 entry_page?entry_page_id=<id>：按卷分模块，rich_text 即书籍全文（逐卷完整转录）。
+- 列表接口 home/content/list?channel_id=68 的 content_id 与 entry_page_id 同一 ID 体系；URL=content/<id>/detail。
+- scripts/obc_books.py：拉 93 词条全文（缓存 data/obc_books_raw.json）→ 归一化精确文本包含 join 本地 BookNNN.txt。
+结果：183 本经 OBC 接回（72 个词条），另 42 本原 BWiki 行经书名确认改指 OBC 词条——合计 225/1259 本书带官方 URL；剩余 20 本仅 BWiki 覆盖（保留 BWiki URL）。72 个 URL HEAD 全 200；--verify 模式已接入每日维护 cron（死链标 source='stale'，前端不出按钮）。
+「跳转原文」已上线：export_static.py 给 genshin.bin header 加 src_url 平行表（120 个带 URL 的 source 标签），前端仅对非空 URL 渲染按钮。浏览器线上实测「最洁白的獠牙」→ 书籍:野猪公主·卷一 + 跳转按钮 → content/625/detail。
+未完成：M4-PREP 第 3 步（物品+任务词条覆盖率评估→决定跳转范围）未做，下次接着做；OBC 书籍频道只有 93 系列，物品/任务频道词条量待测。
+## （旧计划存档）观测枢接入预案
 跳转原文 + 书名接回的源改为**观测枢 Wiki**（米游社原神版块→观测·Wiki，https://baike.mihoyo.com/ys/obc/ ，官方托管+玩家协作，国内直连实测 200）。已验证：搜「野猪公主」有词条，URL 形态 `baike.mihoyo.com/ys/obc/content/<数字id>/detail`（注意是数字 ID，非书名 slug）。步骤：
 1. 找它的搜索/分类数据接口（页面是 SPA，HTML 全是壳；search 接口和书籍分类目录接口待逆向）。
 2. 拉全书籍词条目录 → 按书名（含分卷）join 我们的 Book* 正文，替换/扩大 index/book_titles.db（现 196/1259，BWiki 封顶已确认）。词条名即游戏内书名，预期覆盖率远超 BWiki 方案。
@@ -51,7 +60,7 @@ B. 范围：只做"书籍+社媒"（现成零风险：书籍 URL 已在 index/bo
 
 ## 已知差异（已消除）
 - ~~CLI 收集上限 500/词、标点容忍与网页不一致~~ → query.py 已同步收紧（2026-10-24）：FTS 仅作候选层，命中逐条经「精确子串 ∪ 仅空白间隙」校验后才计 df/打分/分层；收集上限移除。索引无需重建。实测两端完全一致（法涅斯 37强/296弱、坎瑞亚 355，top1 与得分同值）。
-- zstd-19 对中文文本相对 gzip 几乎无增益（16.19→16.17 MB）；保留双格式是为兼容不支持 zstd 的旧浏览器。
+- ~~zstd-19 对中文文本相对 gzip 几乎无增益（16.19→16.17 MB）~~ 是假象：旧 write_gz() 把 .bin.gz 喂给了 zstd（双重压缩），所以体积≈gzip 且浏览器 DecompressionStream('zstd') 解出来仍是 gzip（bad magic，被 catch 静默回退 .gz）。已修（export_static.py 现把裸字节写临时文件再压 zstd）；真实 zst 11.57 MB vs gz 17.18 MB（-33%）。新数据已确认 zst 解出 GSBN 魔数；支持 zstd 的浏览器首载少下 ~5.6 MB。
 
 ## 待做（上线）
 0. ~~M4.5 出处回填~~ 已完成（见顶部状态）。剩余 ~10% 如实保留「出处未定」（实测：Talk 树里也确实没有引用方）。

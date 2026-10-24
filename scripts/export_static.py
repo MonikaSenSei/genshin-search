@@ -48,15 +48,25 @@ def pack_bin(header, sections):
 
 def write_gz(path, data):
     """Write <name>.bin.gz (compat) and <name>.bin.zst (preferred, if zstd
-    CLI available). Returns dict of sizes."""
+    CLI available). Returns dict of sizes.
+    NOTE: zstd must compress the RAW bytes — compressing the .gz file yields
+    a zst wrapper around gzip, which DecompressionStream('zstd') then hands to
+    parseBin as gzip bytes ("bad magic", silent fallback to .gz)."""
     with gzip.open(path, "wb") as f:
         f.write(data)
     sizes = {path: os.path.getsize(path)}
-    import shutil, subprocess
+    import shutil, subprocess, tempfile
+    zp = path[:-3] + ".zst"
     if shutil.which("zstd"):
-        zp = path[:-3] + ".zst"
-        subprocess.run(["zstd", "-19", "-q", "-f", path, "-o", zp], check=True)
-        sizes[zp] = os.path.getsize(zp)
+        with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as tf:
+            tf.write(data)
+            raw = tf.name
+        try:
+            subprocess.run([
+                "zstd", "-19", "-q", "-f", raw, "-o", zp], check=True)
+            sizes[zp] = os.path.getsize(zp)
+        finally:
+            os.unlink(raw)
     return sizes
 
 
@@ -88,12 +98,26 @@ def main():
         return sep.join(strings).encode("utf-8"), struct.pack(
             f"<{len(offs)}I", *offs)
 
+    # optional per-source jump URLs: 书籍:<title> labels that carry an
+    # OBC-verified URL in index/book_titles.db (obc / bwiki->obc only)
+    title_url = {}
+    bt = os.path.join(ROOT, "index", "book_titles.db")
+    if os.path.exists(bt):
+        btc = sqlite3.connect(bt)
+        for t, u, s in btc.execute(
+                "SELECT title, url, source FROM book_titles "
+                "WHERE source IN ('obc','bwiki->obc') AND url != ''"):
+            title_url.setdefault(t, u)
+    src_url = [title_url.get(v[3:], "") if v.startswith("书籍:") else ""
+               for v in src_tbl]
+    print(f"src jump URLs: {sum(1 for u in src_url if u)} / {len(src_tbl)} source labels")
+
     blob, off_bytes = build_blob(texts)
     cols = [col_bytes(ty, "B"), col_bytes(src, "H"), col_bytes(spk, "H"),
             col_bytes(cast, "H")]
     lens = [len(off_bytes), len(blob)] + [len(c) for c in cols]
     header = {"n": len(texts), "lens": lens, "ty": ty_tbl, "src": src_tbl,
-              "spk": spk_tbl, "cast": cast_tbl}
+              "spk": spk_tbl, "cast": cast_tbl, "src_url": src_url}
     sizes = write_gz(os.path.join(OUT, "genshin.bin.gz"),
                      pack_bin(header, [off_bytes, blob] + cols))
     print(f"genshin.bin: {', '.join(f'{os.path.basename(k)} {v/1e6:.2f} MB' for k, v in sizes.items())} ({len(texts)} docs, blob {len(blob)/1e6:.1f} MB)")
