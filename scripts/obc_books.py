@@ -81,30 +81,70 @@ def fetch_raw(entries):
     return raw
 
 
-def join_all(raw):
-    """Return {BookNNN: (display_title, entry_id)} via normalized containment."""
+VOL_PREFIX = re.compile(r"^(第[一二三四五六七八九十百千\d]+[卷章篇讲]|卷[一二三四五六七八九十\d]+|[其之一二三四五六七八九十\d]+)\s*")
+
+
+def ngrams(s, n=6):
+    return {s[i:i + n] for i in range(len(s) - n + 1)} if len(s) >= n else {s}
+
+
+def vol_label(base, name):
+    """Display title for a volume module. 观测枢 names modules inconsistently:
+    sometimes 'series·vol', sometimes bare 'vol', sometimes ''. Never assume
+    the module name alone is a complete title — if it doesn't carry the series
+    name, compose base·name (and empty names fall back to the series name)."""
+    name = re.sub(r"\s+", "", name or "")
+    name = name.strip("·—-")
+    base_ns = re.sub(r"\s+", "", base or "")
+    if not name:
+        return base
+    if name.replace("·", "").startswith(base_ns.replace("·", "")):
+        return name
+    return f"{base_ns}·{name}" if base_ns else name
+
+
+def join_all(raw, min_cov=0.9):
+    """Return ({BookNNN: norm_text}, {BookNNN: (display_title, entry_id)}).
+
+    Matching is tolerant: the wiki is a community transcription and differs
+    from the data dump by single characters (measured: OBC dropped 出 in
+    日月前事, and prepends 「第N卷」 headers to the text itself). Exact
+    normalized containment fails on those. So: strip a leading volume marker
+    from the wiki text, then match on 6-gram coverage of the local text in
+    the wiki text (>= min_cov) OR exact containment. One book takes the
+    best-scoring volume; ties resolved by score."""
     local = {}
     for fn in sorted(os.listdir(REPO)):
         if fn.endswith(".txt"):
             local[fn[:-4]] = norm(open(os.path.join(REPO, fn), encoding="utf-8").read())
-    matches = {}
+    cands = []  # (score, len, book, label, eid)
     for eid, entry in raw.items():
         base = entry["title"]
-        vols = []  # (vol_label, norm_text)
+        vols = []
         for m in entry["modules"]:
             ntext = norm(m["text"])
             if len(ntext) < 20:
                 continue
-            name = m["name"].strip()
-            label = name if name and name.replace(" ", "").startswith(base.replace(" ", "")) else base
-            vols.append((label, ntext))
+            vols.append((vol_label(base, m.get("name") or ""), ntext,
+                         VOL_PREFIX.sub("", ntext)))
         for book, ltext in local.items():
-            if book in matches or len(ltext) < 10:
+            if len(ltext) < 10:
                 continue
-            for label, ntext in vols:
-                if ltext in ntext or ntext in ltext:
-                    matches[book] = (label, eid)
-                    break
+            lg = ngrams(ltext)
+            for label, ntext, ntext2 in vols:
+                ng = ngrams(ntext)
+                ng2 = ngrams(ntext2) if ntext2 != ntext else ng
+                cov = max(len(lg & ng), len(lg & ng2)) / len(lg)
+                exact = ltext in ntext or ltext in ntext2 or ntext in ltext
+                if cov >= min_cov or exact:
+                    cands.append((cov, len(ltext), book, label, eid))
+    cands.sort(reverse=True)
+    matches, taken = {}, set()
+    for cov, _, book, label, eid in cands:
+        if book in taken:
+            continue
+        taken.add(book)
+        matches[book] = (label, eid)
     return local, matches
 
 

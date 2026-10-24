@@ -315,7 +315,7 @@ def main():
 
     # 3) Readable books (titles from scripts/book_titles.py join when found;
     # the official title table no longer exists in any dump)
-    book_title = {}
+    book_title: dict = {}
     bt = os.path.join(ROOT, "index", "book_titles.db")
     if os.path.exists(bt):
         btc = sqlite3.connect(bt)
@@ -327,7 +327,14 @@ def main():
         if not fn.endswith(".txt"):
             continue
         book = fn[:-4]
-        label = f"书籍:{book_title.get(book, book)}"
+        title = book_title.get(book, book)
+        label = f"书籍:{title}"
+        # Title card: book titles live only in the (now-dead) official title
+        # table, so no book's own text contains its title — without this doc,
+        # searching a title could never return the book itself. Kept as a
+        # separate doc so body text stays verbatim.
+        if book in book_title:
+            emit("book_title", f"《{title}》 本书全文已收录于本检索库，正文见同来源结果。", label)
         with open(os.path.join(rd, fn), encoding="utf-8") as f:
             content = f.read()
         for para in split_blocks(content):

@@ -11,7 +11,7 @@ const TYPE_LABEL = {
   "textmap:reminder": "调查短句", "textmap:codex": "图鉴", "textmap:materialcodex": "材料图鉴",
   "textmap:viewcodex": "场景图鉴", "textmap:talk": "角色闲聊", "textmap:dailytask": "每日任务",
   "textmap:item": "物品", "textmap:gadget": "环境物件", "textmap:food": "食物",
-  "textmap:book": "书籍条目", "book": "书籍正文", "subtitle": "过场字幕",
+  "textmap:book": "书籍条目", "book": "书籍正文", "book_title": "书名条目", "subtitle": "过场字幕",
   "textmap:unreferenced": "未引用文本",
 };
 const SRC_LABEL = { takumi: "官网新闻", mys: "米游社", bili: "B站" };
