@@ -111,7 +111,12 @@ def main():
     for r in results.values():
         uniq = sorted(set(r["matched_via"]))
         r["matched_via"] = uniq
-        r["score"] = sum(weights[t][0] for t in uniq)
+        # Title-match priority (mirrors web/app.js): book source labels embed
+        # the title (书籍:<title>); a term that is a title substring boosts
+        # that book's title-card and body docs to the top of the list.
+        title = r["source"][len("书籍:"):] if r["source"].startswith("书籍:") else ""
+        boost = 10 if title and any(t in title for t in uniq) else 1
+        r["score"] = sum(weights[t][0] for t in uniq) * boost
         # strong: literal hit, or >=2 independent aliases corroborate,
         # or a single near-unique alias phrase (df <= 5)
         alias_hits = [t for t in uniq if t != term]

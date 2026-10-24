@@ -110,13 +110,26 @@ function searchCorpus(corpus, terms, base) {
     const df = findDocs(corpus.blob, corpus.offs, t, hits);
     weights.set(t, { idf: Math.log2(N / (df + 1)), df });
   }
+  // Title-match priority: the source label of book docs embeds the book
+  // title (书籍:<title>), so a query that is a substring of a title (日月 /
+  // 日月前 / 日月前事…) boosts that book's title-card AND body docs above
+  // texts that merely mention the words. 10× keeps the tier decisive.
+  const TITLE_PREFIX = "书籍:";
+  const TITLE_BOOST = 10;
+  const titleHit = (doc, t) => {
+    const s = corpus.tbl.src[corpus.cols[1][doc]];
+    return s.startsWith(TITLE_PREFIX) &&
+      s.slice(TITLE_PREFIX.length).includes(t);
+  };
   const results = [];
   for (const [doc, set] of hits) {
     const uniq = [...set];
     const aliasHits = uniq.filter((t) => t !== base);
     const strong = uniq.includes(base) || aliasHits.length >= 2 ||
       aliasHits.some((t) => weights.get(t).df <= 5);
-    results.push({ doc, via: uniq, score: uniq.reduce((a, t) => a + weights.get(t).idf, 0), strong });
+    const baseScore = uniq.reduce((a, t) => a + weights.get(t).idf, 0);
+    const boost = uniq.some((t) => titleHit(doc, t)) ? TITLE_BOOST : 1;
+    results.push({ doc, via: uniq, score: baseScore * boost, strong });
   }
   results.sort((a, b) => b.score - a.score || a.doc - b.doc);
   return { results, weights };
