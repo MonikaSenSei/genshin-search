@@ -332,9 +332,12 @@ def main():
         # Title card: book titles live only in the (now-dead) official title
         # table, so no book's own text contains its title — without this doc,
         # searching a title could never return the book itself. Kept as a
-        # separate doc so body text stays verbatim.
+        # separate doc so body text stays verbatim. Card text is exactly the
+        # title (verified unique across all joined books; if two books ever
+        # share a title, dedup in build/query would drop one — add a unique
+        # invisible suffix then).
         if book in book_title:
-            emit("book_title", f"《{title}》 本书全文已收录于本检索库，正文见同来源结果。", label)
+            emit("book_title", f"《{title}》", label)
         with open(os.path.join(rd, fn), encoding="utf-8") as f:
             content = f.read()
         for para in split_blocks(content):
