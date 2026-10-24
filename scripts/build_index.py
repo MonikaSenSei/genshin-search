@@ -254,6 +254,10 @@ def main():
 
     def emit(corpus_type, text, source, speaker="", cast=""):
         nonlocal n_doc, n_speaker
+        # TextMap strings carry escaped newlines as the two-character
+        # sequence backslash-n (measured 8,356 docs, mostly codex/item
+        # flavor); unescape so the site never shows a literal "\n".
+        text = text.replace("\\n", "\n")
         key = text.strip()
         if len(key) < 2 or key in seen:
             return
