@@ -1,8 +1,26 @@
-# M4 准备（2026-10-24 更新，M4.5 出处回填已完成）
+# M4 准备（2026-10-25 更新：站点已上线 Netlify）
 
-上线本身只差托管选择与注册；静态站点已构建并通过与 CLI 的一致性实测。
+**线上地址：https://genshin-text-search.netlify.app**（已实测：首页 200、数据容器字节一致、「法涅斯」检索 333 篇/37 强/296 弱，与 CLI 完全一致）。
 
-## 当前状态（10-24 下午）
+## 部署与更新管线（当前形态）
+- GitHub 仓库：`github.com/MonikaSenSei/genshin-search`（main；代码+站点产物+数据容器；GDS 大源数据 .gitignore 不进仓库）。
+- Netlify：项目 `genshin-text-search`（site id 32949321-147e-4179-9382-77c794fe10af，Free 团队 monikasensei，GitHub OAuth 已关联账户）。
+- 数据更新一条命令：`python3 scripts/redeploy_netlify.py`（内容哈希增量上传，无变化的文件 0 字节流量）。顺序：social_fetch update → export_static.py → redeploy_netlify.py。
+- Netlify PAT 在仓库根 `.netlify_token`（已 gitignore），名为 deploy-cli，**2026-11-01 过期**；续期：app.netlify.com/user/applications#personal-access-tokens 建新 token 覆盖该文件。
+- 可选升级（一次性）：Netlify 控制台把仓库直接挂到项目做"推即部署"（控制台 UI 的 Import from Git 流程；本次 API 挂仓在 Netlify 新版上不开放，未做成，不影响现管线）。
+
+## 下次开干：观测枢接入（用户已定向，2026-10-25）
+跳转原文 + 书名接回的源改为**观测枢 Wiki**（米游社原神版块→观测·Wiki，https://baike.mihoyo.com/ys/obc/ ，官方托管+玩家协作，国内直连实测 200）。已验证：搜「野猪公主」有词条，URL 形态 `baike.mihoyo.com/ys/obc/content/<数字id>/detail`（注意是数字 ID，非书名 slug）。步骤：
+1. 找它的搜索/分类数据接口（页面是 SPA，HTML 全是壳；search 接口和书籍分类目录接口待逆向）。
+2. 拉全书籍词条目录 → 按书名（含分卷）join 我们的 Book* 正文，替换/扩大 index/book_titles.db（现 196/1259，BWiki 封顶已确认）。词条名即游戏内书名，预期覆盖率远超 BWiki 方案。
+3. 同法评估物品+任务词条覆盖率，决定「跳转原文」范围（原 B 选项的 6-7 成天花板基于 BWiki，需重测）。
+4. 导出加可选 URL 列 → 前端只对已校验 URL 渲染按钮（技术形态不变）→ 每日维护顺带 HEAD 重验。
+不可由此解决的：米游社社媒正文（既有 cron 管线）、出处未定 10%（游戏数据本身缺）。
+
+## 上线前遗留
+1. 米游社正文续抓：139/约1435（每日 9:30 cron 自愈）；补齐后跑一次数据更新命令。
+
+## M4.5 出处回填结果（保留）
 1. M4.5 出处回填：完成。scripts/resolve_qe.py（338MB Talk 树 8 秒扫完）→ index/qe_src.db（260,524 id，其中 247,415 带说话人）→ build_index.py 消费后重建索引。出处未定 269,014 → 24,665（91% 回填），带说话人文本 81k → 309k；总篇数与文本集合与旧库完全一致（零差异），检索语义不变。实测样例：「望舒须筑阶」「踏鞴物语·终幕」等真实任务名+说话人已进 web 端展示（浏览器实测通过）。
    - join 链：Talk/<kind>/<id>.json 文件名即 join key：Quest 文件名=QuestExcelConfigData.subId → mainId → MainQuestExcelConfigData.titleTextMapHash（Quest 表本身无标题字段）；Npc 文件名=configId→nameTextMapHash；说话人=TALK_ROLE_* 引用。
    - 书名：官方表已死（见上），社区路线已做——scripts/book_titles.py 用 BWiki {{书籍}} 模板页正文做归一化包含匹配，196/1259 本接上真实书名（含卷数），已进索引（「书籍:《召唤王》」实测通过）；URL 一并存 index/book_titles.db 供"跳转原文"用。覆盖率封顶=BWiki 只转录了 118 个书页（精确引文检索确认其余书文不在 BWiki 任何页面；Huiji 有 Cloudflare 硬墙；DocumentExcelConfigData 1,862 标题是拾取文档线，与 Book* 正文不重叠；正文内嵌「——标题——」行与 Document 标题碰撞 0 命中）。未接名的保持 书籍:BookNNN。
