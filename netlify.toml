@@ -1,0 +1,16 @@
+# 纯静态站点：无构建步骤，直接发布 web/ 目录
+[build]
+  base = "web"
+  publish = "."
+  command = ""
+
+# 数据文件较大（~19MB），允许浏览器与 CDN 缓存一天；重导出后文件名不变，靠 TTL 刷新
+[[headers]]
+  for = "/data/*"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"
+
+[[headers]]
+  for = "/"
+  [headers.values]
+    Cache-Control = "public, max-age=300"

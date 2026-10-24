@@ -1,0 +1,7 @@
+# 本地数据管线的大文件（不进仓库；站点产物在 web/data/，随提交走）
+data/
+index/
+models/
+__pycache__/
+*.bak
+nohup.out

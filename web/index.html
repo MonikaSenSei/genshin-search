@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>原神全文检索 · Teyvat Text Search</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>原神全文检索</h1>
+  <p class="sub">官方游戏文本 + 官方社媒公告 · 数据全部在本机浏览器内检索，不上传任何查询</p>
+</header>
+<main>
+  <form id="searchform">
+    <input id="q" type="search" placeholder="输入关键词，如：法涅斯 / 虚假之天" autofocus autocomplete="off">
+    <button type="submit">检索</button>
+    <label class="aliasbox"><input id="usealias" type="checkbox" checked> 别名扩展</label>
+  </form>
+  <div id="status" class="status">正在加载语料（首次约 16 MB，之后走浏览器缓存）…</div>
+  <div id="summary"></div>
+  <section id="game-sec" class="sec">
+    <h2 id="game-h" class="h">游戏语料</h2>
+    <div id="strong"></div>
+    <div id="weak"></div>
+  </section>
+  <section id="social-sec" class="sec">
+    <h2 class="h">社媒公告</h2>
+    <div id="social"></div>
+  </section>
+</main>
+<footer id="footer"></footer>
+<script src="app.js"></script>
+</body>
+</html>
