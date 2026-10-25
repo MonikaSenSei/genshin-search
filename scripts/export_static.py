@@ -20,6 +20,7 @@ import os
 import re
 import sqlite3
 import struct
+import unicodedata
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -216,7 +217,8 @@ def main():
             f"<{len(offs)}I", *offs)
 
     # optional per-source jump URLs: 书籍:<title> labels that carry an
-    # OBC-verified URL in index/book_titles.db (obc / bwiki->obc only)
+    # OBC-verified URL in index/book_titles.db (obc / bwiki->obc only),
+    # plus 任务「title」 labels verified by scripts/obc_quests.py
     title_url = {}
     bt = os.path.join(ROOT, "index", "book_titles.db")
     if os.path.exists(bt):
@@ -225,7 +227,52 @@ def main():
                 "SELECT title, url, source FROM book_titles "
                 "WHERE source IN ('obc','bwiki->obc') AND url != ''"):
             title_url.setdefault(t, u)
-    src_url = [title_url.get(v[3:], "") if v.startswith("书籍:") else ""
+    quest_path = os.path.join(ROOT, "data", "quest_urls.json")
+    quest_norm = {}
+    if os.path.exists(quest_path):
+        for t, e in json.load(open(quest_path, encoding="utf-8"))["map"].items():
+            if e.get("ok") and e.get("url"):
+                title_url.setdefault(f"「{t}」", e["url"])
+
+                nq = re.sub(r"[\W_]+", "", unicodedata.normalize("NFKC", t).lower(),
+                           flags=re.UNICODE)
+                quest_norm.setdefault(nq, e["url"])
+                parts = [unicodedata.normalize("NFKC", p).lower()
+                         for p in re.split(r"[·・.．]", t)]
+                if len(parts) >= 2:
+                    head = re.sub(r"[\W_]+", "", parts[0], flags=re.UNICODE)
+                    if head:
+                        quest_norm.setdefault("<series>" + head, e["url"])
+
+    def series_inherit(t):
+        # 'S·X' inherits the jump of matched bare-series key 'S', or of a
+        # matched 'S·V' entry (its series half was indexed under <series>S)
+        tparts = [unicodedata.normalize("NFKC", p).lower()
+                  for p in re.split(r"[·・.．]", t)]
+        if len(tparts) >= 2:
+            head = re.sub(r"[\W_]+", "", tparts[0], flags=re.UNICODE)
+            return quest_norm.get(head) or quest_norm.get("<series>" + head, "")
+        return ""
+
+    def quest_bracket_url(tail):
+        # 任务「踏鞴物语·终幕」 style labels: exact title, else series inherit
+        nt = re.sub(r"[\W_]+", "", unicodedata.normalize("NFKC", tail).lower(),
+                    flags=re.UNICODE)
+        return quest_norm.get(nt) or series_inherit(tail)
+
+    def quest_label_url(v):
+        # other provenance label shapes carry the bare title after '｜'
+        # (mainquest｜踏鞴物语·终幕 etc); same exact-then-inherit rule
+        if "｜" not in v:
+            return ""
+        head, tail = v.split("｜", 1)
+        if head not in ("mainquest", "dailytask", "quest"):
+            return ""
+        return quest_bracket_url(tail)
+
+    src_url = [title_url.get(v[3:], "") if v.startswith("书籍:") else
+               (quest_bracket_url(v[2:]) if v.startswith("任务「")
+                else quest_label_url(v))
                for v in src_tbl]
     print(f"src jump URLs: {sum(1 for u in src_url if u)} / {len(src_tbl)} source labels")
 
