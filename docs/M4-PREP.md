@@ -63,6 +63,14 @@ API 补充事实：列表接口返回 data.list[0].list（频道节点内嵌全�
 下一对话任务：按用户定的栏目优先级做「角色故事」栏（角色频道 25/276 条）+「生物志」栏（敌人频道 6/834 条），各单开一栏，复用网格卡组件（点击行为待用户定：弹窗或跳转）。
 可选顺带：观景点线 257 篇挂跳转（M4.6 第 3 步已验证近全量可接）；世界任务/部分魔神任务 exact-title join ~241 标题。
 
+## M4.9 角色/生物栏 + 富文本标签清洗（2026-10-26 完成，已上线）
+用户决定：角色、生物卡片点击都跳转观测枢词条页（同书籍，不开弹窗）。
+数据层：export_charlayer() 直接吃 obc_fetch_channel.py 25/6 的列表缓存（无需抓详情页）→ characters.bin（去重 131 角色，全带 icon）/ creatures.bin（417 生物，全带 icon，zst 合计 ~36KB）。match 字段拆装饰变体：【预告】剥离、「死之执政」若娜瓦 拆出「死之执政」「若娜瓦」两段可搜。
+前端：index.html 新增 chars-sec/creatures-sec（顺序=书名>角色>生物>物品，按用户定的优先级）；app.js 抽出 renderLinkGrid 共用组件（书/角色/生物三处），renderEntrySection 通用匹配渲染；loadLayer(key) 通用加载。注意：执行官（公子/仆人等）在观测枢属敌人频道 → 命中在生物栏（角色栏没有），符合观测枢自身分类。
+富文本清洗（用户报「<color=#00E1FFFF> 出现在结果里」）：build_index.py emit() 剥 <color=>/<size=>/<i>/<center|right|multi>/<image|region/>（实测 7,956 篇含标签；<病历> 这类正文性尖括号词不匹配标签正则、保留）。索引 386,279→385,963（剥离后文本合法合并），旧库备份 index/genshin.db.bak-2026-10-26。
+每日维护 cron 已扩：步骤 5=obc_fetch_channel 68 25 6 + items fetch/parse 增量，步骤 6=export_static + redeploy（内容哈希增量，无变化零流量）。
+实测（本地+线上）：「纳西妲」角色卡带图→content/5111/detail；「公子」生物栏命中；「丘丘人」14 条；「若娜瓦」带图；「日月」检索结果 color 标签归零、「病历」文本保留。
+
 
 ## （旧计划存档）观测枢接入预案
 跳转原文 + 书名接回的源改为**观测枢 Wiki**（米游社原神版块→观测·Wiki，https://baike.mihoyo.com/ys/obc/ ，官方托管+玩家协作，国内直连实测 200）。已验证：搜「野猪公主」有词条，URL 形态 `baike.mihoyo.com/ys/obc/content/<数字id>/detail`（注意是数字 ID，非书名 slug）。步骤：
