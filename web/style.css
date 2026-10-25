@@ -60,3 +60,17 @@ footer { max-width: 880px; margin: 0 auto; padding: 16px 20px 40px;
 .modal-head img { width: 84px; height: 84px; background: #0b0b0e; border-radius: 8px; object-fit: contain; }
 .modal-name { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
 .modal-h { color: var(--acc); font-size: 13px; margin: 14px 0 4px; }
+
+/* first-load curtain: whole page is a loading screen until corpora ready */
+#loader { position: fixed; inset: 0; z-index: 100; background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+  transition: opacity .35s ease; }
+#loader.gone { opacity: 0; pointer-events: none; }
+#loader.fail #load-status { color: #d46a6a; }
+.loader-box { max-width: 420px; width: 100%; padding: 0 24px; text-align: center; }
+.loader-title { font-size: 24px; font-weight: 700; color: var(--acc); margin-bottom: 8px; }
+.loader-sub { color: var(--dim); font-size: 13px; margin-bottom: 22px; }
+.load-bar { height: 6px; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 4px; overflow: hidden; margin-top: 10px; }
+#load-bar-fill { height: 100%; width: 0%; background: var(--acc);
+  transition: width .25s ease; }

@@ -7,17 +7,24 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div id="loader">
+  <div class="loader-box">
+    <div class="loader-title">原神全文检索</div>
+    <div class="loader-sub">官方游戏文本 + 官方社媒公告 · 数据全部在本机浏览器内检索，不上传任何查询</div>
+    <div id="load-status" class="status">正在准备…</div>
+    <div class="load-bar"><div id="load-bar-fill"></div></div>
+  </div>
+</div>
 <header>
   <h1>原神全文检索</h1>
   <p class="sub">官方游戏文本 + 官方社媒公告 · 数据全部在本机浏览器内检索，不上传任何查询</p>
 </header>
 <main>
   <form id="searchform">
-    <input id="q" type="search" placeholder="输入关键词，如：法涅斯 / 虚假之天" autofocus autocomplete="off">
-    <button type="submit">检索</button>
+    <input id="q" type="search" placeholder="输入关键词，如：法涅斯 / 虚假之天" autocomplete="off" disabled>
+    <button type="submit" disabled>检索</button>
     <label class="aliasbox"><input id="usealias" type="checkbox" checked> 别名扩展</label>
   </form>
-  <div id="status" class="status">正在加载语料（首次约 16 MB，之后走浏览器缓存）…</div>
   <div id="summary"></div>
   <section id="titles-sec" class="sec">
     <h2 class="h">书名匹配</h2>

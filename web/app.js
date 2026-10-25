@@ -17,12 +17,33 @@ const TYPE_LABEL = {
 const SRC_LABEL = { takumi: "官网新闻", mys: "米游社", bili: "B站" };
 const KIND_LABEL = { weapon: "武器", artifact: "圣遗物套装", food: "料理", material: "材料" };
 
-async function fetchDecompressed(base) {
+async function fetchDecompressed(base, onProgress) {
   const tryOne = async (url, fmt) => {
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(resp.status);
+    const total = Number(resp.headers.get("content-length")) || 0;
+    let body;
+    if (onProgress) {
+      // report real downloaded bytes against the compressed content-length
+      const reader = resp.body.getReader();
+      const chunks = [];
+      let got = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        got += value.length;
+        onProgress("download", total ? Math.min(1, got / total) : -1, got);
+      }
+      const merged = new Uint8Array(got);
+      let o = 0;
+      for (const c of chunks) { merged.set(c, o); o += c.length; }
+      body = new Response(merged).body;
+    } else {
+      body = resp.body;
+    }
     const ds = new DecompressionStream(fmt);
-    return new Uint8Array(await new Response(resp.body.pipeThrough(ds)).arrayBuffer());
+    return new Uint8Array(await new Response(body.pipeThrough(ds)).arrayBuffer());
   };
   try { return await tryOne(base + ".zst", "zstd"); }
   catch (e) { return await tryOne(base + ".gz", "gzip"); }
@@ -43,8 +64,8 @@ function reinterp(b, Ctor) {
   return new Ctor(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
 }
 
-async function loadGame() {
-  const bytes = await fetchDecompressed("data/genshin.bin");
+async function loadGame(onProgress) {
+  const bytes = await fetchDecompressed("data/genshin.bin", onProgress);
   const { header, sec } = parseBin(bytes);
   const offs = reinterp(sec(0), Uint32Array);
   const blob = new TextDecoder("utf-8").decode(sec(1));
@@ -53,8 +74,8 @@ async function loadGame() {
   state.g = { n: header.n, offs, blob, cols, tbl: header };
 }
 
-async function loadSocial() {
-  const bytes = await fetchDecompressed("data/social.bin");
+async function loadSocial(onProgress) {
+  const bytes = await fetchDecompressed("data/social.bin", onProgress);
   const { header, sec } = parseBin(bytes);
   const offs = reinterp(sec(0), Uint32Array);
   const blob = new TextDecoder("utf-8").decode(sec(1));
@@ -440,21 +461,39 @@ function setFooter() {
     `别名表 ${m.aliases.length} 词条 · 索引构建于本次导出`;
 }
 
+const mb = (n) => (n / 1048576).toFixed(1) + " MB";
+
 async function main() {
-  const status = document.getElementById("status");
+  const loader = document.getElementById("loader");
+  const line = document.getElementById("load-status");
+  const bar = document.getElementById("load-bar-fill");
+  const setBar = (frac, got, total) => {
+    bar.style.width = (frac >= 0 ? Math.round(frac * 100) : 0) + "%";
+    if (got != null) line.textContent = `下载语料 ${mb(got)}${total ? " / " + mb(total) : ""}…`;
+  };
   try {
     const metaResp = await fetch("data/meta.json");
     state.meta = await metaResp.json();
-    await loadSocial();
-    status.textContent = "社媒已就绪，正在加载游戏语料（约 16 MB，仅首次）…";
-    await loadGame();
-    status.textContent = `就绪：游戏文本 ${state.meta.counts.docs} 篇 · 社媒 ${state.meta.counts.posts} 条`;
-    setTimeout(() => status.remove(), 4000);
+    line.textContent = "正在加载社媒公告…";
+    await loadSocial((_, frac, got) => setBar(frac, got, null));
+    line.textContent = "正在加载游戏语料（约 16 MB，仅首次，之后走浏览器缓存）…";
+    await loadGame((_, frac, got) => setBar(frac, got, null));
+    bar.style.width = "100%";
+    line.textContent = "正在解析索引…";
+    // yield one frame so the "parsing" line paints before the sync parse blocks
+    await new Promise((r) => setTimeout(r, 30));
     setFooter();
   } catch (e) {
-    status.textContent = "加载失败：" + e;
+    loader.classList.add("fail");
+    line.textContent = "加载失败：" + e + "（刷新重试）";
     return;
   }
+  // corpora ready: lift the curtain, only now open the search box
+  loader.classList.add("gone");
+  setTimeout(() => loader.remove(), 400);
+  document.getElementById("q").disabled = false;
+  document.querySelector("#searchform button").disabled = false;
+  document.getElementById("q").focus();
   document.getElementById("searchform").addEventListener("submit", (ev) => {
     ev.preventDefault();
     runSearch(document.getElementById("q").value);
