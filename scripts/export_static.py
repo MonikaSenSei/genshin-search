@@ -56,7 +56,7 @@ def write_gz(path, data):
     NOTE: zstd must compress the RAW bytes — compressing the .gz file yields
     a zst wrapper around gzip, which DecompressionStream('zstd') then hands to
     parseBin as gzip bytes ("bad magic", silent fallback to .gz)."""
-    with gzip.open(path, "wb") as f:
+    with gzip.GzipFile(path, "wb", mtime=0) as f:
         f.write(data)
     sizes = {path: os.path.getsize(path)}
     import shutil, subprocess, tempfile
