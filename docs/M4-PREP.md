@@ -88,6 +88,14 @@ API 补充事实：列表接口返回 data.list[0].list（频道节点内嵌全�
 教训（已入 skill）：「真名」可能是三层（代号/称号/本名），别名条目应覆盖全部已知层；标记清洗要枚举 { 族不能只查 < 族。
 
 
+## M4.10 首屏加载幕 + 观景点跳转（2026-10-26 完成，已上线）
+加载幕（用户报「语料加载完成前搜索无效，体验差」）：整页遮罩（标题+状态行+字节进度条），按 content-length（本地/Netlify 均返回）显示「下载语料 x.x MB / 11.0 MB」；社媒+游戏语料全部加载解析完才淡出揭幕，之后才启用搜索框/按钮并聚焦——加载中搜索栏 disabled，不再有静默无效检索。加载失败时遮罩不撤，红字「加载失败：…（刷新重试）」。实测本地+线上：加载中 loader=present 且 q.disabled=true，揭幕 ~2s（缓存）；「日月前事」无回归。fetchDecompressed 加 onProgress（读流计字节），main() 重写为揭幕流程。
+观景点线（M4.6 第 3 步验证过的方向 1）：scripts/obc_viewpoints.py = 拉观景点频道(253, 264 条, 缓存 data/obc_channel_253.json) → ViewCodex 名称归一化全等 join → desc 文本确认在语料 → 逐 URL HEAD 校验，产出 data/viewpoint_urls.json（desc 全文 → {id,name,url,ok}；重跑时 URL 未变则跳过 HEAD，--内建 verify）。实测 257/268 可接、0 冲突、0 死链。
+导出/前端：一条文本可能属多个场景时置冲突不出按钮（实测冲突 0）。genshin.bin header 新增 doc_url 稀疏表（doc 下标→URL；场景图鉴没有独立 source 标签，必须逐文档）；gameCard 跳转优先级 = doc_url > src_url。实测本地+线上：搜「望舒客栈的楼阁」场景图鉴卡带跳转→content/504954/detail。
+每日维护 cron 已扩：步骤 4 顺带跑 obc_viewpoints.py（重 join+全量 HEAD，摘要含「观景点 N/N 存活」）。
+注意：本次导出文档总数 385,963→385,962（−1），为 M4.9.2 索引重建（03:17）后首次重导出，属剥离标记后文本合法合并，非 bug。浏览器实测坑：本测试浏览器无 DecompressionStream('zstd')（走 .gz 回退），直接探测 .zst 会抛错；检索后立刻查 DOM 可能读到空结果，多等 2-3 秒再断言。
+下一对话可做：方向 2=世界任务/部分魔神任务 exact-title join（~241 标题、~9.9k 篇）；方向 3=占位书 OBC 正文注入（31 本）。
+
 ## （旧计划存档）观测枢接入预案
 跳转原文 + 书名接回的源改为**观测枢 Wiki**（米游社原神版块→观测·Wiki，https://baike.mihoyo.com/ys/obc/ ，官方托管+玩家协作，国内直连实测 200）。已验证：搜「野猪公主」有词条，URL 形态 `baike.mihoyo.com/ys/obc/content/<数字id>/detail`（注意是数字 ID，非书名 slug）。步骤：
 1. 找它的搜索/分类数据接口（页面是 SPA，HTML 全是壳；search 接口和书籍分类目录接口待逆向）。
