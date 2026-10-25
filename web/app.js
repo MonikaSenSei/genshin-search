@@ -159,6 +159,28 @@ function highlightInto(node, text, terms, window) {
   if (end < text.length) node.append("…");
 }
 
+function renderLinkGrid(box, header, matches, tagLabel, wide) {
+  // Shared grid of link cards (books / characters / creatures): clicking a
+  // card opens the 观测枢 (or BWiki) entry in a new tab — no in-site modal.
+  box.append(el("h3", null, header));
+  const grid = el("div", "item-grid");
+  if (wide) grid.classList.add("wide-grid");
+  for (const m of matches) {
+    const card = el("a", "item-card book-card");
+    card.title = m.name;
+    card.href = m.url || "#";
+    card.target = "_blank"; card.rel = "noopener";
+    if (!m.url) card.classList.add("no-link");
+    if (m.icon) { const img = el("img"); img.src = m.icon; img.loading = "lazy"; img.alt = ""; card.append(img); }
+    card.append(el("div", "item-name", m.disp || m.name));
+    const meta = el("div", "item-meta");
+    meta.append(el("span", "tag", tagLabel(m)));
+    card.append(meta);
+    grid.append(card);
+  }
+  box.append(grid);
+}
+
 function renderTitleSection(q) {
   // Dedicated top section: books whose title contains the query. Rendered as
   // an icon grid like the items section; cards open the 观测枢 entry directly
@@ -171,7 +193,7 @@ function renderTitleSection(q) {
   let matches;
   if (state.books && state.books.length) {
     matches = state.books.filter((b) => b.title.includes(q))
-      .map((b) => ({ title: b.title, disp: b.disp || `《${b.title}》`,
+      .map((b) => ({ name: b.title, disp: b.disp || `《${b.title}》`,
                      url: b.url, icon: b.icon }));
   } else {
     const PREFIX = "书籍:";
@@ -183,29 +205,32 @@ function renderTitleSection(q) {
       const title = s.slice(PREFIX.length);
       if (UNRESOLVED.test(title) || !title.includes(q) || seen.has(title)) return;
       seen.add(title);
-      matches.push({ title, disp: `《${title}》`,
+      matches.push({ name: title, disp: `《${title}》`,
                      url: (state.g.tbl.src_url || [])[i] || "", icon: "" });
     });
   }
   if (!matches.length) { sec.hidden = true; return; }
-  matches.sort((a, b) => a.title.localeCompare(b.title, "zh"));
+  matches.sort((a, b) => a.name.localeCompare(b.name, "zh"));
   sec.hidden = false;
-  box.append(el("h3", null, `书名含「${q}」 · ${matches.length} 本`));
-  const grid = el("div", "item-grid");
-  for (const m of matches) {
-    const card = el("a", "item-card book-card");
-    card.title = m.title;
-    card.href = m.url || "#";
-    card.target = "_blank"; card.rel = "noopener";
-    if (!m.url) card.classList.add("no-link");
-    if (m.icon) { const img = el("img"); img.src = m.icon; img.loading = "lazy"; img.alt = ""; card.append(img); }
-    card.append(el("div", "item-name", m.disp));
-    const meta = el("div", "item-meta");
-    meta.append(el("span", "tag", m.url ? "观测枢原文" : "BWiki"));
-    card.append(meta);
-    grid.append(card);
-  }
-  box.append(grid);
+  renderLinkGrid(box, `书名含「${q}」 · ${matches.length} 本`, matches,
+    (m) => m.url.includes("biligame") ? "BWiki" : "观测枢原文", true);
+}
+
+function renderEntrySection(q, key, secId, boxId, unit) {
+  // characters.bin / creatures.bin: name-variant match, cards link to the
+  // 观测枢 entry page.
+  const sec = document.getElementById(secId);
+  const box = document.getElementById(boxId);
+  box.replaceChildren();
+  const list = state[key] || [];
+  const matches = list.filter((e) =>
+    (e.alias || "").includes(q) ||
+    (e.match || []).some((v) => v.includes(q)));
+  if (!matches.length) { sec.hidden = true; return; }
+  matches.sort((a, b) => a.name.localeCompare(b.name, "zh"));
+  sec.hidden = false;
+  renderLinkGrid(box, `${unit}名含「${q}」 · ${matches.length} 个`, matches,
+    () => "观测枢词条", true);
 }
 
 async function loadItems() {
@@ -220,6 +245,13 @@ async function loadBooks() {
     const bytes = await fetchDecompressed("data/books.bin");
     state.books = JSON.parse(new TextDecoder("utf-8").decode(bytes));
   } catch (e) { state.books = []; } // site built without the books layer
+}
+
+async function loadLayer(key) {
+  try {
+    const bytes = await fetchDecompressed(`data/${key}.bin`);
+    state[key] = JSON.parse(new TextDecoder("utf-8").decode(bytes));
+  } catch (e) { state[key] = []; } // site built without this layer
 }
 
 function starHtml(n) {
@@ -379,6 +411,10 @@ async function runSearch(rawQ) {
   const t0 = performance.now();
   if (state.books == null) await loadBooks();
   renderTitleSection(q);
+  if (state.characters == null) await loadLayer("characters");
+  if (state.creatures == null) await loadLayer("creatures");
+  renderEntrySection(q, "characters", "chars-sec", "chars", "角色");
+  renderEntrySection(q, "creatures", "creatures-sec", "creatures", "生物");
   if (state.items == null) await loadItems();
   renderItemsSection(q);
   const { results, weights } = searchCorpus(state.g, terms, q);

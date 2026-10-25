@@ -146,6 +146,47 @@ def export_books():
     print(f"books.bin: {', '.join(f'{os.path.basename(k)} {v/1e3:.0f} KB' for k, v in sizes.items())} ({len(slim)} titles, {n_icon} with icon)")
 
 
+def export_charlayer():
+    """M4.9 character & creature layers: 观测枢 channel listings (25=角色,
+    6=敌人) -> characters.bin / creatures.bin. Plain JSON arrays; cards
+    link straight to the OBC entry (like books, no modal). match = name
+    variants with 【预告】/「…」 decorations split out so '若娜瓦' hits
+    '「死之执政」若娜瓦'."""
+    chans = [("25", "characters"), ("6", "creatures")]
+    for cid, outname in chans:
+        src = os.path.join(ROOT, "data", f"obc_channel_{cid}.json")
+        if not os.path.exists(src):
+            print(f"{outname}: no data/obc_channel_{cid}.json, skipping")
+            continue
+        entries = json.load(open(src, encoding="utf-8"))
+        slim, seen = [], set()
+        for e in entries:
+            title = (e.get("title") or "").strip()
+            if not title or title in seen:
+                continue
+            seen.add(title)
+            base = re.sub(r"【[^】]*】", "", title).strip()
+            mvars = {title, base}
+            for seg in re.findall(r"「([^」]+)」|」(.+)", title):
+                for s in seg:
+                    if s.strip():
+                        mvars.add(s.strip())
+            mvars = sorted(m for m in mvars if m)
+            o = {"name": base or title, "match": mvars,
+                 "alias": e.get("alias_name") or "",
+                 "summary": e.get("summary") or "",
+                 "icon": e.get("icon") or "",
+                 "url": f"https://baike.mihoyo.com/ys/obc/content/"
+                        f"{e['content_id']}/detail"}
+            slim.append(o)
+        slim.sort(key=lambda o: o["name"])
+        data = json.dumps(slim, ensure_ascii=False,
+                          separators=(",", ":")).encode("utf-8")
+        sizes = write_gz(os.path.join(OUT, f"{outname}.bin.gz"), data)
+        n_icon = sum(1 for o in slim if o["icon"])
+        print(f"{outname}.bin: {', '.join(f'{os.path.basename(k)} {v/1e3:.0f} KB' for k, v in sizes.items())} ({len(slim)} entries, {n_icon} with icon)")
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
 
@@ -225,6 +266,7 @@ def main():
 
     export_items()
     export_books()
+    export_charlayer()
 
 
 if __name__ == "__main__":

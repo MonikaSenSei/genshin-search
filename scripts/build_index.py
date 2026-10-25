@@ -258,6 +258,16 @@ def main():
         # sequence backslash-n (measured 8,356 docs, mostly codex/item
         # flavor); unescape so the site never shows a literal "\n".
         text = text.replace("\\n", "\n")
+        # In-game rich-text markup leaks into raw TextMap strings (measured
+        # 7,956 docs): <color=..>/<size=..> styling tags, <i>/<center>
+        # layout tags, <image/>/<region/> placeholders. Strip them; content
+        # stays. Angle-bracketed WORDS that are part of the fiction
+        # (<病历>) never match the tag regexes below.
+        text = re.sub(r"<color=[^>]*>|</color>", "", text)
+        text = re.sub(r"<size=\d+>|</size>", "", text)
+        text = re.sub(r"<[iI]>|</[iI]>", "", text)
+        text = re.sub(r"</?(?:center|right|multi)>", "", text)
+        text = re.sub(r"<(?:image|region)[^>]*/?>", "", text)
         key = text.strip()
         if len(key) < 2 or key in seen:
             return
