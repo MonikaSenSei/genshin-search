@@ -278,9 +278,11 @@
  },
  {
   "term": "「女士」",
-  "aliases": [],
-  "note": "执行官第八席，真名不在语料（仅「女士」之墓等代号称呼），无真名可加。",
-  "source": "corpus verify 2026-10-26"
+  "aliases": [
+   "罗莎琳"
+  ],
+  "note": "执行官第八席。真名=罗莎琳：语料 51 篇（图鉴「亲爱的罗莎琳」、葬礼/燃珀剧情线）。OBC 无独立词条。",
+  "source": "corpus verify 2026-10-26 (fix: missed earlier pass)"
  },
  {
   "term": "「队长」",
@@ -427,5 +429,21 @@
   ],
   "note": "代号裸词。",
   "source": "corpus verify 2026-10-26"
+ },
+ {
+  "term": "罗莎琳",
+  "aliases": [
+   "「女士」"
+  ],
+  "note": "反向：真名→代号。",
+  "source": "corpus verify 2026-10-26 (fix: missed earlier pass)"
+ },
+ {
+  "term": "女士",
+  "aliases": [
+   "罗莎琳"
+  ],
+  "note": "代号裸词（不带引号）。常用尊称，语料含大量噪声；卡片价值无（OBC 无词条），但语料召回有价值（女士的葬礼等剧情线只用尊称）。",
+  "source": "corpus verify 2026-10-26 (fix: missed earlier pass)"
  }
 ]
