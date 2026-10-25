@@ -53,7 +53,15 @@ API 补充事实：列表接口返回 data.list[0].list（频道节点内嵌全�
 组件结构要点：详情=page.modules[].components[]，data 为 JSON 字符串；富文本是 HTML（<p>/<span class=custom-entry-wrapper> 内嵌词条链接）；食材有同名变体行（奇怪的X/美味X）取主名行。
 待做：export_static.py 加 items 容器（name/alias/kind/category/star/icon/desc 摘要/url，全名表+摘要进前端，故事全文可同容器——5k×~1KB 可接受）；app.js 物品匹配栏+详情弹窗；daily 维护顺带死链校验。
 实测记录（2026-10-26 本地预览）：物品栏用户验收「非常棒」。抓取实际去重量=2,690（频道列表含重复，5.3k 是未去重数）。
-下一对话任务（用户已确认做）：书名匹配栏改成物品栏同款图标网格卡。图标源=观测枢书籍词条 icon（列表 API icon 字段已有 / entry_page icon_url，index/book_titles.db 已存 293 本的 OBC url 反推 entry id）；书籍卡片点击=直接跳转观测枢原文（不开弹窗，与物品的差别就这一处）；无 OBC 词条的 20 本 BWiki 书退化为纯文字卡；未接名 BookNNN 不进网格。
+物品抓取完成：去重 2,690 词条全部抓齐（0 失败）；parse 产出 2,648 条（42 条空正文跳过），items.bin 已含全量并上线。
+
+## M4.8 书名匹配网格卡（2026-10-26 完成，已上线）
+书名栏从文字列表改为物品栏同款图标网格卡；卡片点击=新标签直开观测枢原文（不开弹窗）。
+数据管线：export_static.py export_books() → web/data/books.bin（zst 8KB，285 个接名书名，标题从 book_titles.db 去重；封面 icon 从缓存 data/obc_channel_68.json 按 URL 里的 entry id 反查——列表 API icon 字段即封面，93 词条全部有 icon）。277 本带观测枢封面，8 本仅 BWiki 覆盖的退化为无图文字卡（tag 标 BWiki）。
+前端：app.js renderTitleSection 重写为读 books.bin（books.bin 缺失时回退旧 src 标签扫描）；style.css 复用 .item-grid/.item-card，加 .book-card（a 标签去下划线）。书名自带《》的 3 本（召唤王等）导出时预生成 disp 字段防双书名号。
+实测（本地 + 线上均通过）：「日月前事」1 本带封面卡→content/3470/detail 图片加载成功；「公主」8 本全带图且 naturalWidth>0；「召唤王」BWiki 文字卡无双书名号；物品栏「狼」7 条正常。
+下一对话任务：按用户定的栏目优先级做「角色故事」栏（角色频道 25/276 条）+「生物志」栏（敌人频道 6/834 条），各单开一栏，复用网格卡组件（点击行为待用户定：弹窗或跳转）。
+可选顺带：观景点线 257 篇挂跳转（M4.6 第 3 步已验证近全量可接）；世界任务/部分魔神任务 exact-title join ~241 标题。
 
 
 ## （旧计划存档）观测枢接入预案
