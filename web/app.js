@@ -216,16 +216,17 @@ function renderTitleSection(q) {
     (m) => m.url.includes("biligame") ? "BWiki" : "观测枢原文", true);
 }
 
-function renderEntrySection(q, key, secId, boxId, unit) {
-  // characters.bin / creatures.bin: name-variant match, cards link to the
-  // 观测枢 entry page.
+function renderEntrySection(q, terms, key, secId, boxId, unit) {
+  // characters.bin / creatures.bin: name-variant match (through the alias
+  // table too: 「仆人」→阿蕾奇诺), cards link to the 观测枢 entry page.
   const sec = document.getElementById(secId);
   const box = document.getElementById(boxId);
   box.replaceChildren();
   const list = state[key] || [];
   const matches = list.filter((e) =>
-    (e.alias || "").includes(q) ||
-    (e.match || []).some((v) => v.includes(q)));
+    terms.some((t) =>
+      (e.alias || "").includes(t) ||
+      (e.match || []).some((v) => v.includes(t))));
   if (!matches.length) { sec.hidden = true; return; }
   matches.sort((a, b) => a.name.localeCompare(b.name, "zh"));
   sec.hidden = false;
@@ -413,8 +414,8 @@ async function runSearch(rawQ) {
   renderTitleSection(q);
   if (state.characters == null) await loadLayer("characters");
   if (state.creatures == null) await loadLayer("creatures");
-  renderEntrySection(q, "characters", "chars-sec", "chars", "角色");
-  renderEntrySection(q, "creatures", "creatures-sec", "creatures", "生物");
+  renderEntrySection(q, terms, "characters", "chars-sec", "chars", "角色");
+  renderEntrySection(q, terms, "creatures", "creatures-sec", "creatures", "生物");
   if (state.items == null) await loadItems();
   renderItemsSection(q);
   const { results, weights } = searchCorpus(state.g, terms, q);
