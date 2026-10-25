@@ -229,12 +229,25 @@ def main():
                for v in src_tbl]
     print(f"src jump URLs: {sum(1 for u in src_url if u)} / {len(src_tbl)} source labels")
 
+    # per-doc jump URLs (viewpoint descs have no per-source label: the join
+    # is per text) — data/viewpoint_urls.json map key == exact doc body
+    doc_url = {}
+    vp_path = os.path.join(ROOT, "data", "viewpoint_urls.json")
+    if os.path.exists(vp_path):
+        vp = json.load(open(vp_path, encoding="utf-8")).get("map", {})
+        for i, t in enumerate(texts):
+            e = vp.get(t)
+            if e and e.get("ok") and e.get("url"):
+                doc_url[str(i)] = e["url"]
+    print(f"doc jump URLs: {len(doc_url)} (viewpoints)")
+
     blob, off_bytes = build_blob(texts)
     cols = [col_bytes(ty, "B"), col_bytes(src, "H"), col_bytes(spk, "H"),
             col_bytes(cast, "H")]
     lens = [len(off_bytes), len(blob)] + [len(c) for c in cols]
     header = {"n": len(texts), "lens": lens, "ty": ty_tbl, "src": src_tbl,
-              "spk": spk_tbl, "cast": cast_tbl, "src_url": src_url}
+              "spk": spk_tbl, "cast": cast_tbl, "src_url": src_url,
+              "doc_url": doc_url}
     sizes = write_gz(os.path.join(OUT, "genshin.bin.gz"),
                      pack_bin(header, [off_bytes, blob] + cols))
     print(f"genshin.bin: {', '.join(f'{os.path.basename(k)} {v/1e6:.2f} MB' for k, v in sizes.items())} ({len(texts)} docs, blob {len(blob)/1e6:.1f} MB)")

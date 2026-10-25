@@ -382,7 +382,7 @@ function gameCard(r, terms, g) {
   const meta = el("div", "meta");
   meta.append(el("span", "tag", TYPE_LABEL[g.tbl.ty[g.cols[0][r.doc]]] || g.tbl.ty[g.cols[0][r.doc]]));
   meta.append(el("span", "src", g.tbl.src[g.cols[1][r.doc]]));
-  const jump = (g.tbl.src_url || [])[g.cols[1][r.doc]];
+  const jump = (g.tbl.doc_url || {})[r.doc] || (g.tbl.src_url || [])[g.cols[1][r.doc]];
   if (jump) { const a = el("a", "link", "跳转原文"); a.href = jump; a.target = "_blank"; a.rel = "noopener"; meta.append(a); }
   const spk = g.tbl.spk[g.cols[2][r.doc]];
   if (spk) meta.append(el("span", "spk", "说话人：" + spk));
