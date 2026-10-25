@@ -101,7 +101,7 @@ scripts/obc_quests.py：任务频道(43) 去重 1098 词条 ↔ 索引 1105 个 
 export_static.py：任务标签挂 src_url 三种形态——任务「X」直接/系列继承；mainquest｜X、dailytask｜X、quest｜X 取 ｜ 后标题同规则（+432 篇；item｜/viewcodex｜ 与任务同名属巧合不挂）。src_url 标签总数 277→746。注意：非任务出处的对白提到任务名不挂跳转（正确语义：跳转=该文档属于该任务）。
 实测（本地）：「踏鞴物语·终幕」mainquest 卡→content/2394（系列继承）；「三十人团」的招募→7647、「月莲杯」的初战→505553（「」段 join）；提到任务名的普通对白无按钮。
 cron 步骤 4 已加 obc_quests.py（join+全量 HEAD）；步骤 6 发布成功后 git add/commit/push（此前 daily 数据提交不会自动进 GitHub，已修）。
-阻塞（2026-10-26 04:20）：Netlify 返回 403『Account credit usage exceeded - new deploys are blocked until credits are added』——站点现网正常（仍为 M4.10 版），M4.11 数据已 commit+push 到 GitHub。账号=新 credits 制（nf_team_dev，300 credits/周期，API 无明细端点，usage API 404），消耗元凶已查明=导出字节非确定性（gzip 嵌 mtime）导致每日重发全量重传 ~50MB；已修（mtime=0，双跑 md5 一致）。【用户决定：本月不再尝试任何 Netlify 上传；以后也不做「每写完一个版本就发一次线上」。日常只 commit+push GitHub + 本地预览验证；下月额度重置后再跑一次 scripts/redeploy_netlify.py 集中发布（届时顺带续 PAT，11-01 过期）。cron 步骤 6 已去掉 redeploy。】
+阻塞（2026-10-26 04:20）：Netlify 返回 403『Account credit usage exceeded - new deploys are blocked until credits are added』——站点现网正常（仍为 M4.10 版），M4.11 数据已 commit+push 到 GitHub。账号=新 credits 制（nf_team_dev，300 credits/周期，API 无明细端点，usage API 404），消耗元凶已查明=导出字节非确定性（gzip 嵌 mtime）导致每日重发全量重传 ~50MB；已修（mtime=0，双跑 md5 一致）。【用户决定（最终规则）：项目正式完工前一律不发布 Netlify，完工后由用户提醒才发布；在此之前日常只 commit+push GitHub + 本地预览验证，维护 cron 无发布步骤。】
 下一对话可做：方向 3=占位书 OBC 正文注入（31 本）。
 
 ## （旧计划存档）观测枢接入预案
