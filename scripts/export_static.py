@@ -9,12 +9,15 @@ Binary container (then gzipped) to keep download ~10MB class:
 Outputs:
   web/data/genshin.bin.gz  386k docs: text + type/source/speaker/cast
   web/data/social.bin.gz   posts: title+body blob, url/pub/source columns
+  web/data/items.bin.gz    M4.7 items layer: plain JSON array (lite cards)
+  web/data/books.bin.gz    M4.8 book-title layer: plain JSON array (icon cards)
   web/data/meta.json       alias table + corpus baseline + counts
 Re-run after index rebuilds / social_fetch update to refresh site data.
 """
 import gzip
 import json
 import os
+import re
 import sqlite3
 import struct
 
@@ -68,6 +71,79 @@ def write_gz(path, data):
         finally:
             os.unlink(raw)
     return sizes
+
+
+def export_items():
+    """M4.7 items layer: OBC item entries -> items.bin (plain JSON array,
+    gz/zst dual-format; fetched by the same fetchDecompressed path).
+    Lite card fields only; numeric tables are viewed on the OBC page itself."""
+    src = os.path.join(ROOT, "data", "obc_items.json")
+    if not os.path.exists(src):
+        print("items: no data/obc_items.json, skipping items.bin")
+        return
+    raw = json.load(open(src, encoding="utf-8"))
+    keep = ("id", "kind", "name", "alias", "category", "star", "icon",
+            "desc", "effect", "story", "obtain", "rarity", "url")
+    slim = []
+    for r in raw:
+        o = {k: r.get(k, "") for k in keep}
+        if r.get("slots"):
+            o["slots"] = [{k2: s.get(k2, "") for k2 in
+                           ("slot", "name", "icon", "desc", "story")}
+                          for s in r["slots"]]
+        if o["name"]:
+            slim.append(o)
+    data = json.dumps(slim, ensure_ascii=False,
+                      separators=(",", ":")).encode("utf-8")
+    sizes = write_gz(os.path.join(OUT, "items.bin.gz"), data)
+    print(f"items.bin: {', '.join(f'{os.path.basename(k)} {v/1e6:.2f} MB' for k, v in sizes.items())} ({len(slim)} entries)")
+
+
+def export_books():
+    """M4.8 book-title layer: joined book titles from index/book_titles.db +
+    cover icons from the cached 观测枢 book-channel listing (refresh with
+    scripts/obc_fetch_channel.py 68). Plain JSON array; cards link straight
+    to the OBC entry (no in-site modal)."""
+    bt = os.path.join(ROOT, "index", "book_titles.db")
+    if not os.path.exists(bt):
+        print("books: no index/book_titles.db, skipping books.bin")
+        return
+    icons = {}
+    ch = os.path.join(ROOT, "data", "obc_channel_68.json")
+    if os.path.exists(ch):
+        acc = []
+
+        def find(o):
+            if isinstance(o, dict):
+                if "content_id" in o:
+                    acc.append(o)
+                else:
+                    for v in o.values():
+                        find(v)
+            elif isinstance(o, list):
+                for v in o:
+                    find(v)
+        find(json.load(open(ch, encoding="utf-8")))
+        icons = {str(e["content_id"]): e.get("icon", "") for e in acc}
+    btc = sqlite3.connect(bt)
+    slim, seen = [], set()
+    for title, url, src in btc.execute(
+            "SELECT title, url, source FROM book_titles "
+            "WHERE url != '' ORDER BY title"):
+        if title in seen:
+            continue
+        seen.add(title)
+        m = re.search(r"/content/(\d+)/", url)
+        o = {"title": title, "url": url,
+             "disp": title if title.startswith("《") else f"《{title}》",
+             "icon": icons.get(m.group(1), "") if m else ""}
+        slim.append(o)
+    slim.sort(key=lambda o: o["title"])
+    data = json.dumps(slim, ensure_ascii=False,
+                      separators=(",", ":")).encode("utf-8")
+    sizes = write_gz(os.path.join(OUT, "books.bin.gz"), data)
+    n_icon = sum(1 for o in slim if o["icon"])
+    print(f"books.bin: {', '.join(f'{os.path.basename(k)} {v/1e3:.0f} KB' for k, v in sizes.items())} ({len(slim)} titles, {n_icon} with icon)")
 
 
 def main():
@@ -146,6 +222,9 @@ def main():
     with open(os.path.join(OUT, "meta.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False)
     print(f"meta.json ({len(aliases)} alias entries)")
+
+    export_items()
+    export_books()
 
 
 if __name__ == "__main__":

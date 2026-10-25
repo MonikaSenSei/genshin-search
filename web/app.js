@@ -15,6 +15,7 @@ const TYPE_LABEL = {
   "textmap:unreferenced": "未引用文本",
 };
 const SRC_LABEL = { takumi: "官网新闻", mys: "米游社", bili: "B站" };
+const KIND_LABEL = { weapon: "武器", artifact: "圣遗物套装", food: "料理", material: "材料" };
 
 async function fetchDecompressed(base) {
   const tryOne = async (url, fmt) => {
@@ -159,37 +160,141 @@ function highlightInto(node, text, terms, window) {
 }
 
 function renderTitleSection(q) {
-  // Dedicated top section: books whose title contains the query, straight
-  // from the embedded source labels (书籍:<title>) — every joined volume,
-  // regardless of whether its body text mentions the query at all.
+  // Dedicated top section: books whose title contains the query. Rendered as
+  // an icon grid like the items section; cards open the 观测枢 entry directly
+  // (no in-site modal). Data = books.bin (titles joined to OBC entries, cover
+  // icons from the book-channel listing); falls back to the old src-label
+  // scan when the books layer is absent.
   const sec = document.getElementById("titles-sec");
   const box = document.getElementById("titles");
   box.replaceChildren();
-  const PREFIX = "书籍:";
-  const UNRESOLVED = /^[A-Za-z]+\d/; // BookNNN/WeaponNNN… = title not joined back
-  const seen = new Set();
-  const matches = [];
-  (state.g.tbl.src || []).forEach((s, i) => {
-    if (!s.startsWith(PREFIX)) return;
-    const title = s.slice(PREFIX.length);
-    if (UNRESOLVED.test(title) || !title.includes(q) || seen.has(title)) return;
-    seen.add(title);
-    matches.push({ title, url: (state.g.tbl.src_url || [])[i] || "" });
-  });
+  let matches;
+  if (state.books && state.books.length) {
+    matches = state.books.filter((b) => b.title.includes(q))
+      .map((b) => ({ title: b.title, disp: b.disp || `《${b.title}》`,
+                     url: b.url, icon: b.icon }));
+  } else {
+    const PREFIX = "书籍:";
+    const UNRESOLVED = /^[A-Za-z]+\d/; // BookNNN/WeaponNNN… = title not joined back
+    const seen = new Set();
+    matches = [];
+    (state.g.tbl.src || []).forEach((s, i) => {
+      if (!s.startsWith(PREFIX)) return;
+      const title = s.slice(PREFIX.length);
+      if (UNRESOLVED.test(title) || !title.includes(q) || seen.has(title)) return;
+      seen.add(title);
+      matches.push({ title, disp: `《${title}》`,
+                     url: (state.g.tbl.src_url || [])[i] || "", icon: "" });
+    });
+  }
   if (!matches.length) { sec.hidden = true; return; }
   matches.sort((a, b) => a.title.localeCompare(b.title, "zh"));
   sec.hidden = false;
   box.append(el("h3", null, `书名含「${q}」 · ${matches.length} 本`));
+  const grid = el("div", "item-grid");
   for (const m of matches) {
-    const card = el("div", "card");
-    card.append(el("div", "title-line", `《${m.title}》`));
-    if (m.url) {
-      const a = el("a", "link", "跳转原文");
-      a.href = m.url; a.target = "_blank"; a.rel = "noopener";
-      card.append(a);
-    }
-    box.append(card);
+    const card = el("a", "item-card book-card");
+    card.title = m.title;
+    card.href = m.url || "#";
+    card.target = "_blank"; card.rel = "noopener";
+    if (!m.url) card.classList.add("no-link");
+    if (m.icon) { const img = el("img"); img.src = m.icon; img.loading = "lazy"; img.alt = ""; card.append(img); }
+    card.append(el("div", "item-name", m.disp));
+    const meta = el("div", "item-meta");
+    meta.append(el("span", "tag", m.url ? "观测枢原文" : "BWiki"));
+    card.append(meta);
+    grid.append(card);
   }
+  box.append(grid);
+}
+
+async function loadItems() {
+  try {
+    const bytes = await fetchDecompressed("data/items.bin");
+    state.items = JSON.parse(new TextDecoder("utf-8").decode(bytes));
+  } catch (e) { state.items = []; } // site built without the items layer
+}
+
+async function loadBooks() {
+  try {
+    const bytes = await fetchDecompressed("data/books.bin");
+    state.books = JSON.parse(new TextDecoder("utf-8").decode(bytes));
+  } catch (e) { state.books = []; } // site built without the books layer
+}
+
+function starHtml(n) {
+  return "★".repeat(n) + '<span class="star-off">' + "☆".repeat(Math.max(0, 5 - n)) + "</span>";
+}
+
+function openItemModal(it) {
+  const old = document.getElementById("item-modal");
+  if (old) old.remove();
+  const ov = el("div", "modal"); ov.id = "item-modal";
+  const box = el("div", "modal-box");
+  const close = el("button", "modal-close", "×");
+  close.addEventListener("click", () => ov.remove());
+  box.append(close);
+  const head = el("div", "modal-head");
+  if (it.icon) { const img = el("img"); img.src = it.icon; img.alt = ""; head.append(img); }
+  const hi = el("div");
+  hi.append(el("div", "modal-name", it.name));
+  const meta = el("div", "meta");
+  if (KIND_LABEL[it.kind]) meta.append(el("span", "tag", KIND_LABEL[it.kind]));
+  if (it.star) { const s = el("span", "item-star"); s.innerHTML = starHtml(it.star); meta.append(s); }
+  if (it.rarity) meta.append(el("span", "src", it.rarity));
+  if (it.category) meta.append(el("span", "src", it.category));
+  if (it.alias) meta.append(el("span", "src", "别名：" + it.alias));
+  hi.append(meta);
+  head.append(hi);
+  box.append(head);
+  const sect = (title, text) => {
+    if (!text) return;
+    box.append(el("h4", "modal-h", title));
+    const b = el("div", "body"); b.textContent = text; box.append(b);
+  };
+  if (it.desc) sect("描述", it.desc);
+  if (it.effect) sect("效果", it.effect);
+  for (const s of it.slots || [])
+    sect(`${s.slot}：${s.name}`, [s.desc, s.story].filter(Boolean).join("\n\n"));
+  if (it.story) sect("故事", it.story);
+  if (it.obtain) sect("获取方式", it.obtain);
+  if (it.url) {
+    const a = el("a", "link", "在观测枢查看完整词条（数值/推荐角色）");
+    a.href = it.url; a.target = "_blank"; a.rel = "noopener";
+    box.append(a);
+  }
+  ov.append(box);
+  ov.addEventListener("click", (ev) => { if (ev.target === ov) ov.remove(); });
+  document.addEventListener("keydown", function esc(ev) {
+    if (ev.key === "Escape") { ov.remove(); document.removeEventListener("keydown", esc); }
+  });
+  document.body.append(ov);
+}
+
+function renderItemsSection(q) {
+  const sec = document.getElementById("items-sec");
+  const box = document.getElementById("items");
+  box.replaceChildren();
+  const matches = (state.items || []).filter(
+    (it) => it.name.includes(q) || (it.alias || "").includes(q));
+  if (!matches.length) { sec.hidden = true; return; }
+  sec.hidden = false;
+  matches.sort((a, b) => (b.star - a.star) || a.name.localeCompare(b.name, "zh"));
+  box.append(el("h3", null, `物品名含「${q}」 · ${matches.length} 个`));
+  const grid = el("div", "item-grid");
+  for (const it of matches) {
+    const card = el("div", "item-card");
+    card.title = it.name;
+    if (it.icon) { const img = el("img"); img.src = it.icon; img.loading = "lazy"; img.alt = ""; card.append(img); }
+    card.append(el("div", "item-name", it.name));
+    const meta = el("div", "item-meta");
+    if (KIND_LABEL[it.kind]) meta.append(el("span", "tag", KIND_LABEL[it.kind]));
+    if (it.star) { const s = el("span", "item-star"); s.innerHTML = starHtml(it.star); meta.append(s); }
+    card.append(meta);
+    card.addEventListener("click", () => openItemModal(it));
+    grid.append(card);
+  }
+  box.append(grid);
 }
 
 function renderGame(results, terms) {
@@ -272,7 +377,10 @@ async function runSearch(rawQ) {
   const entry = state.meta.aliases.find((a) => a.term === q);
   if (entry && useAlias) terms = [q, ...entry.aliases];
   const t0 = performance.now();
+  if (state.books == null) await loadBooks();
   renderTitleSection(q);
+  if (state.items == null) await loadItems();
+  renderItemsSection(q);
   const { results, weights } = searchCorpus(state.g, terms, q);
   renderGame(results, terms);
   const soc = searchCorpus(state.s, [q], q);
