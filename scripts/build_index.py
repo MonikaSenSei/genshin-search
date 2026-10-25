@@ -268,6 +268,17 @@ def main():
         text = re.sub(r"<[iI]>|</[iI]>", "", text)
         text = re.sub(r"</?(?:center|right|multi)>", "", text)
         text = re.sub(r"<(?:image|region)[^>]*/?>", "", text)
+        # brace-markup families (measured 12,958 docs): {RUBY#[flags]word}
+        # furigana wrappers (the word lives INSIDE the braces, [D]/[S] are
+        # reading tags — strip the shell+flags, keep the word; braces only
+        # break substring search), {LINK#id}..{/LINK} shells,
+        # {SPRITE_PRESET#{n}} icon chips. KEEP player/quest placeholders
+        # ({NICKNAME} {M} {F} {Q...} {REALNAME} {PLAYERAVATAR}) — readable.
+        text = re.sub(r"\{RUBY#(?:\[[A-Z]\])*(?:\|[^{}]*)?([^{}|]*)\}", r"\1", text)
+        text = re.sub(r"\{LINK#[^{}]*\}|\{/LINK\}", "", text)
+        text = re.sub(r"\{\{?SPRITE_PRESET#\{[^{}]*\}\}", "", text)
+        text = re.sub(r"\{SPRITE_PRESET#[^{}]*\}", "", text)
+        text = re.sub(r"\{SPRITE(?:PRESET)?#[^{}]*\}", "", text)
         key = text.strip()
         if len(key) < 2 or key in seen:
             return
