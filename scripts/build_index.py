@@ -321,9 +321,54 @@ def main():
         print(f"  qe provenance map: {len(qe)} ids")
 
     # 1) TextMap ids referenced by story tables
-    dev_marker = re.compile(r"\$UNRELEASED|\$HIDDEN|[（(]\s*(?:test|hide)\s*[)）]", re.I)
+    dev_marker = re.compile(
+        r"\$UNRELEASED|\$HIDDEN|[（(]\s*(?:test|hide)\s*[)）]"
+        r"|(?:^|[\s\-])test[\s\-]*", re.I)
     proven_prefix = re.compile(
         r"^(任务|活动|多人任务|未上线|NPC|自由|物件|故事板|地脉|剧情|过场)")
+    # Chinese class names, kept identical to the frontend's TYPE_LABEL so the
+    # source label never shows an internal table name (user rule: no codes)
+    CLASS_CN = {
+        "mainquest": "主线任务", "quest": "任务", "dailytask": "每日任务",
+        "reminder": "调查短句", "codex": "图鉴", "materialcodex": "材料图鉴",
+        "viewcodex": "场景图鉴", "talk": "角色闲聊", "item": "物品",
+        "gadget": "环境物件", "food": "食物", "book": "书籍条目",
+    }
+
+    def proven_join(classes, row_labels, mid, extra=None):
+        """Readable provenance string: pre-formatted qe labels verbatim,
+        bare row titles wrapped as 类名「标题」 using the referencing class.
+        extra: raw qe source string to clean on its own (orphan pass)."""
+        cls_primary = next((c for c in classes if c in CLASS_CN), None)
+        merged = list(dict.fromkeys(row_labels))
+        if extra:
+            merged += [x for x in extra.split("｜") if x and x != "出处未定"]
+        q = qe.get(mid) if mid is not None else None
+        if q and q[0]:
+            merged += [x for x in q[0].split("｜") if x and x != "出处未定"]
+        parts, seen = [], set()
+        for l in merged:
+            # runtime placeholders inside title labels: {QuestNpcID} -> 某人
+            l = re.sub(r"\{[A-Za-z0-9_]+(?:\[[^\]]*\])?\}", "某人", l)
+            if not re.search(r"[\u4e00-\u9fff]", l):
+                continue  # internal identifiers (player, BlossomGroup#…)
+            key = l if proven_prefix.match(l) else (
+                (CLASS_CN.get(cls_primary) or "") + "「%s」" % l)
+            if key and key not in seen:
+                seen.add(key)
+                parts.append(key)
+            if len(parts) == 2:
+                break
+        # real provenance outranks dev scaffolding: drop 未上线 labels when
+        # anything concrete was found (they only help when alone)
+        real = [p for p in parts if not p.startswith("未上线")]
+        if real:
+            parts = real
+        return "、".join(parts)
+
+    def clean_q_label(raw):
+        """same cleaning for raw qe source strings (orphan pass)."""
+        return proven_join([], [], -1, extra=raw) or "出处未定"
     for mid, rl in refs.items():
         text = tm.get(str(mid)) or ""
         if not text.strip():
@@ -349,20 +394,13 @@ def main():
             # best talk-file context label from the qe map. When provenance
             # is known it replaces the generic 对白（在场） placeholder —
             # the card's type tag already says 对白.
-            proven = list(dict.fromkeys(labels))
-            q = qe.get(mid)
-            if q and q[0]:
-                proven += [x for x in q[0].split("｜") if x and x != "出处未定"]
-            proven = proven[:2]
-            if proven:
-                src = "、".join(
-                    l if proven_prefix.match(l) else "「%s」" % l
-                    for l in proven)
-            else:
-                src = "对白（在场）"
+            prov = proven_join(classes, labels, mid)
+            src = prov or "对白（在场）"
         if src is None:
-            tag = ",".join(classes)
-            src = f"{tag}" + (f"｜{'、'.join(sorted(set(labels))[:3])}" if labels else "")
+            # Chinese-shaped provenance; when nothing is known emit 出处未定 —
+            # the card's type tag already names the class, an English class
+            # code adds nothing (user rule: no internal codes)
+            src = proven_join(classes, labels, mid) or "出处未定"
         emit("textmap:" + ",".join(classes), text, src, spk, cast)
 
     # 2) orphan story-looking text (QE-script dialogue etc.). The qe map
@@ -379,7 +417,7 @@ def main():
             continue  # dev scaffolding memos (test/unreleased quests)
         q = qe.get(int(k))
         if q:
-            emit("textmap:unreferenced", s, q[0], q[1], "")
+            emit("textmap:unreferenced", s, clean_q_label(q[0]), q[1], "")
         else:
             emit("textmap:unreferenced", s, "出处未定")
         orphans_kept += 1
@@ -509,7 +547,8 @@ def main():
         if not fn.endswith(".srt"):
             continue
         sub = fn[:-4]
-        label = subs_src.get(sub, f"字幕:{sub}")
+        # subs table now covers every asset (resolved or 未关联任务)
+        label = subs_src.get(sub, "过场字幕（未关联任务）")
         for text in parse_srt(os.path.join(sd, fn)):
             emit("subtitle", text, label)
 

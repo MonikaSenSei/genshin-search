@@ -307,8 +307,10 @@ def main():
             return plabel_url.get(v, "")
         if v.startswith("codex｜"):
             return codex_url.get(v[len("codex｜"):], "")
-        if v.startswith("任务「"):
-            return quest_bracket_url(v[2:])
+        for pfx in ("任务「", "主线任务「", "每日任务「", "多人任务「",
+                    "活动任务「", "任务对话组「"):
+            if v.startswith(pfx):
+                return quest_bracket_url(v[len(pfx):])
         return quest_label_url(v)
 
     src_url = [label_jump(v) for v in src_tbl]

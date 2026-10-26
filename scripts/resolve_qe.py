@@ -173,9 +173,11 @@ def main():
                 return npc_display(h) or ""
         return ""
 
-    # 未上线/dev markers in quest titles: $HIDDEN/$UNRELEASED/(test)
+    # 未上线/dev markers in quest titles: $HIDDEN/$UNRELEASED/(test)/(hide)/
+    # bare leading "test" (5.x scaffolding titles omit the parens)
     dev_mark = re.compile(r"\$UNRELEASED|\$HIDDEN")
-    test_mark = re.compile(r"[（(]\s*test\s*[)）]", re.I)
+    test_mark = re.compile(r"[（(]\s*(?:test|hide)\s*[)）]|(?:^|[\s\-])test[\s\-]*",
+                           re.I)
 
     def quest_title(nid):
         """quest subId (or talk-registry questId, or a bare main-quest id) ->
@@ -189,6 +191,9 @@ def main():
         h = main_title.get(m) if m is not None else main_title.get(nid)
         if h:
             t = tm_text(h)
+            if t:
+                # runtime placeholders inside titles: {QuestNpcID} -> 某人
+                t = re.sub(r"\{[A-Za-z0-9_]+(?:\[[^\]]*\])?\}", "某人", t)
             if t and len(t) <= 60:
                 dev = bool(dev_mark.search(t))
                 if dev:
@@ -229,9 +234,31 @@ def main():
     def npc_display(h):
         """npc name label text, or None if it is dev/test scaffolding."""
         t = tm_text(h)
-        if t and len(t) <= 40 and not re.search(
+        # host placeholders (#{REALNAME[ID(n)|HOSTONLY…]}) = the Traveler
+        if re.fullmatch(r"#?\{REALNAME\[[^{}]*\}\}?", t or ""):
+            return "旅行者"
+        # dev scaffolding names: test/hide prefix (any separator or none),
+        # (隐藏) marker
+        if re.match(r"^\s*(?:test|hide)", t or "", re.I) \
+                or re.match(r"^[（(](?:隐藏|hidden)[)）]", t or ""):
+            return None
+        if t and len(t) <= 40 and re.search(r"[\u4e00-\u9fff]", t) \
+                and not re.search(
                 r"\$UNRELEASED|\$HIDDEN|[（(]\s*(?:test|hide)\s*[)）]", t, re.I):
             return t
+        return None
+
+    def cond_quest(row):
+        """last-resort anchor: quest numbers embedded in beginCond params
+        (QUEST_COND_QUEST_GLOBAL_VAR_EQUAL etc.) -> quest title"""
+        for cond in (row.get("beginCond") or []):
+            if not isinstance(cond, dict):
+                continue
+            for p in (cond.get("param") or []):
+                if isinstance(p, str) and p.isdigit():
+                    t, dev = quest_title(int(p))
+                    if t is not None and not dev:
+                        return t
         return None
 
     def ctx_label(kind, cid):
@@ -276,6 +303,9 @@ def main():
             nm = npc_label(row)
             if nm and kind in ("FreeGroup", "NpcOther", "Gadget", "GadgetGroup"):
                 return f"{KIND_LABELS.get(kind, kind)}「{nm}」"
+            cq = cond_quest(row)
+            if cq:
+                return f"{KIND_LABELS.get(kind, kind)}（任务「{cq}」）"
         return f"{KIND_LABELS.get(kind, kind)}#{cid}"
 
     # 3) walk Talk tree
@@ -358,26 +388,49 @@ def main():
 
     # 5) subtitle asset names -> 过场字幕（任务「…」）via embedded quest numbers.
     # Asset stems look like Cs_Sumeru_AQ_30310701_HB_Boy / EQ4019208; the
-    # digits inside resolve through the same quest joins. Unresolvable stems
-    # are simply not written; build_index keeps 字幕:<asset> for those.
+    # digits inside resolve through the same quest joins. Stems that resolve
+    # to nothing still get a Chinese label: the region token is translated
+    # (Mengde/MD→蒙德 …) and the clip is honestly marked 未关联任务 — the
+    # internal cutscene numbers exist in no table and must not be shown raw.
     out.execute("CREATE TABLE subs(asset TEXT PRIMARY KEY, source TEXT)")
+    region_cn = {
+        "fontaine": "枫丹", "fd": "枫丹", "natlan": "纳塔", "nodkrai": "纳塔",
+        "nk": "纳塔", "sumeru": "须弥", "smr": "须弥", "inazuma": "稻妻",
+        "iz": "稻妻", "md": "蒙德", "mengde": "蒙德", "mdaq": "蒙德",
+        "liyue": "璃月", "ly": "璃月", "lyaq": "璃月", "ambor": "须弥",
+    }
     ns = 0
+    nr = 0
     sd = os.path.join(args.repo, "Subtitle", "CHS")
     if os.path.isdir(sd):
         for fn in sorted(os.listdir(sd)):
             if not fn.endswith(".srt"):
                 continue
             stem = fn[:-4]
+            resolved = None
             for num in re.findall(r"\d{4,}", stem):
                 t, dev = quest_title(int(num))
                 if t is not None:
                     src = ("未上线任务「%s」" % t) if dev else f"任务「{t}」"
-                    out.execute("INSERT OR REPLACE INTO subs VALUES (?,?)",
-                                (stem, f"过场字幕（{src}）"))
-                    ns += 1
+                    resolved = f"过场字幕（{src}）"
                     break
+            if resolved:
+                out.execute("INSERT OR REPLACE INTO subs VALUES (?,?)",
+                            (stem, resolved))
+                ns += 1
+                continue
+            parts = stem.split("_")
+            reg = ""
+            probe = parts[1] if len(parts) > 1 and parts[0] == "Cs" else parts[0]
+            for k in sorted(region_cn, key=len, reverse=True):
+                if probe.lower().startswith(k):
+                    reg = region_cn[k]
+                    break
+            label = f"过场字幕（{reg}·未关联任务）" if reg else "过场字幕（未关联任务）"
+            out.execute("INSERT OR REPLACE INTO subs VALUES (?,?)", (stem, label))
+            nr += 1
         out.commit()
-    print(f"subtitle provenance resolved: {ns} assets -> subs table")
+    print(f"subtitle provenance: {ns} resolved to quests, {nr} marked 未关联任务")
 
 
 if __name__ == "__main__":
