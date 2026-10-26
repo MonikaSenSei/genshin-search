@@ -14,6 +14,7 @@ const TYPE_LABEL = {
   "textmap:book": "书籍条目", "book": "书籍正文", "book_title": "书名条目", "subtitle": "过场字幕",
   "textmap:unreferenced": "未引用文本",
   "textmap:unreleased": "未上线文本",
+  "textmap:ext": "其他文本（玩法/系统）",
   "book_obc": "书籍（观测枢转录）", "maptext": "世界文书", "maptext_obc": "世界文书（观测枢转录）",
   "maptext_title": "世界文书条目",
   "pickup": "世界文书（未收录）", "flavor": "物品故事",
@@ -110,14 +111,19 @@ function bisectDoc(offs, pos) {
 
 const ADDR_SUFFIX = /^(大人|先生|女士|小姐|将军|队长|团长|参谋|骑士|武士|前辈|师父|师傅|殿下|公子|管家|执事|老师)/;
 const isCJKCode = (c) => c >= 0x4E00 && c <= 0x9FFF;
+// single-char particles/suffixes: adjacency to one is a REAL word boundary,
+// never glue evidence (长正的 = real name + 的; 的长正… = word starts after 的)
+const PARTICLE = new Set("的了着过地得之其此该们个些吗呢吧啊呀嘛哦么哈".split(""));
 
 function findDocs(corpus, term, hits, quality) {
   // Index tokenizer ignores punctuation/whitespace between chars (FTS5
   // single-char CJK), so exact-substring and tolerant-regex results are
   // unioned; both count each doc once.
   // Quality tracking (user rule 2026-10): a hit whose every occurrence is
-  // CJK-glued on both sides and whose right context is a much more common
-  // pair (正在 ≫ 长正) is a cross-word accident (警长|正在) -> demoted.
+  // word-glued on both sides (警长|正在 contains 长正; 擅长|正面 too) is a
+  // cross-word accident -> demoted. Evidence: left pair (prev,term0) and
+  // right pair (termLast,next) must both be real corpus words, and the
+  // query term must be far rarer than the glue pair it accidentally forms.
   const blob = corpus.blob, offs = corpus.offs;
   const docs = new Set();
   const dem = new Set(); // docs whose every occurrence of term is glue-suspect
@@ -127,7 +133,7 @@ function findDocs(corpus, term, hits, quality) {
     let s = hits.get(d); if (!s) hits.set(d, s = new Set());
     s.add(term);
     if (!quality.has(d)) quality.set(d, new Map());
-    if (!quality.get(d).has(term)) quality.get(d).set(term, { clean: false, maxPair: 0 });
+    if (!quality.get(d).has(term)) quality.get(d).set(term, { clean: false, maxLeft: 0, maxRight: 0 });
     return quality.get(d).get(term);
   };
   let pos = blob.indexOf(term);
@@ -139,12 +145,15 @@ function findDocs(corpus, term, hits, quality) {
       const prevC = pos > 0 ? blob.charCodeAt(pos - 1) : 0;
       const nIdx = pos + term.length;
       const nextC = nIdx < blob.length ? blob.charCodeAt(nIdx) : 0;
-      if (!(isCJKCode(prevC) && isCJKCode(nextC)) ||
-          ADDR_SUFFIX.test(blob.slice(nIdx, nIdx + 3))) {
-        st.clean = true;
+      if (!(isCJKCode(prevC) && isCJKCode(nextC)) || PARTICLE.has(blob[pos - 1]) ||
+          PARTICLE.has(blob[nIdx]) || ADDR_SUFFIX.test(blob.slice(nIdx, nIdx + 3))) {
+        st.clean = true; // real word boundary on at least one side
       } else if (term.length > 1 && corpus.bg) {
-        const f = corpus.bg.get(term.charCodeAt(term.length - 1) << 16 | nextC) || 0;
-        if (f > st.maxPair) st.maxPair = f;
+        // >>>0: JS bitwise ops are signed int32; pair keys are unsigned
+        const lf = corpus.bg.get((prevC << 16 | term.charCodeAt(0)) >>> 0) || 0;
+        if (lf > st.maxLeft) st.maxLeft = lf;
+        const rf = corpus.bg.get((term.charCodeAt(term.length - 1) << 16 | nextC) >>> 0) || 0;
+        if (rf > st.maxRight) st.maxRight = rf;
       } else {
         st.clean = true;
       }
@@ -167,7 +176,9 @@ function findDocs(corpus, term, hits, quality) {
   if (corpus.bg && term.length > 1) {
     for (const [d, m] of quality) {
       const st = m.get(term);
-      if (st && !st.clean && st.maxPair >= 500 && occ <= 0.1 * st.maxPair) dem.add(d);
+      const glue = Math.max(st && st.maxLeft || 0, st && st.maxRight || 0);
+      if (st && !st.clean && st.maxLeft >= 20 && st.maxRight >= 150 &&
+          occ <= 0.3 * glue) dem.add(d);
     }
   }
   return { df: docs.size, occ, dem };

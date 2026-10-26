@@ -446,6 +446,48 @@ def main():
             src = src or "出处未定"
         emit("textmap:" + ",".join(classes), text, src, spk, cast)
 
+    # 1c) extended-context scan for orphan strings: walk the FULL Excel layer
+    # (minigame/system tables that story classification deliberately denied)
+    # and map orphan TextMap ids to their feature layer. Only families whose
+    # meaning is unambiguous get a label; the rest stay honestly 出处未定.
+    # (No region field exists for these layers, so region cannot be promised.)
+    TABLE_CATEGORY = [
+        ("fungus", "小游戏：蕈兽对战玩法"),
+        ("gcg", "七圣召唤（卡牌玩法）"),
+        ("homeworld", "尘歌壶（家园摆设）"),
+        ("dungeonlevel", "秘境关卡文本"),
+        ("coop", "联机模式文本"),
+        ("fishpool", "钓鱼玩法（鱼群文本）"),
+    ]
+    ext_src = {}
+    for fn in sorted(os.listdir(ebi)):
+        if not fn.endswith(".json"):
+            continue
+        table = fn[:-len("ExcelConfigData.json")].lower()
+        cat = next((c for key, c in TABLE_CATEGORY if key in table), None)
+        if cat is None or table_class(table) is not None:
+            continue  # only families we can name; story tables add no orphans
+        try:
+            data = json.load(open(os.path.join(ebi, fn), encoding="utf-8"))
+        except Exception:
+            continue
+        ids = set()
+
+        def walk(o):
+            if isinstance(o, dict):
+                for v in o.values():
+                    walk(v)
+            elif isinstance(o, list):
+                for v in o:
+                    walk(v)
+            elif isinstance(o, int) and o in tm_keys:
+                ids.add(o)
+        walk(data)
+        for mid in ids:
+            if mid not in refs and mid not in ext_src:
+                ext_src[mid] = cat
+    print(f"  extended-context map: {len(ext_src)} orphan ids -> feature layer")
+
     # 2) orphan story-looking text (QE-script dialogue etc.). The qe map
     # loaded above gives most of them a real quest/npc provenance + speaker;
     # the rest stays honestly 出处未定.
@@ -466,7 +508,14 @@ def main():
             # real context, the type tag follows that context instead
             emit("textmap:" + orphan_class(lab), s, lab, q[1], "")
         else:
-            emit("textmap:unreferenced", s, "出处未定")
+            # no talk-registry context: try the feature-layer map (minigame/
+            # system tables); a doc WITH a feature label gets a matching type
+            # tag, never 未引用文本 (user rule: tag follows provenance)
+            lab = ext_src.get(int(k))
+            if lab:
+                emit("textmap:ext", s, lab)
+            else:
+                emit("textmap:unreferenced", s, "出处未定")
         orphans_kept += 1
     print(f"  orphan story-shaped kept: {orphans_kept}")
 
