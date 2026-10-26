@@ -13,7 +13,13 @@ const TYPE_LABEL = {
   "textmap:item": "物品", "textmap:gadget": "环境物件", "textmap:food": "食物",
   "textmap:book": "书籍条目", "book": "书籍正文", "book_title": "书名条目", "subtitle": "过场字幕",
   "textmap:unreferenced": "未引用文本",
+  "book_obc": "书籍（观测枢转录）", "maptext": "世界文书", "maptext_obc": "世界文书（观测枢转录）",
+  "maptext_title": "世界文书条目",
+  "pickup": "世界文书（未收录）", "flavor": "物品故事",
 };
+// M4.12 user rule: world documents / item stories / wiki transcriptions rank
+// strictly below the main corpus regardless of score.
+const LOW_TIERS = new Set(["maptext", "maptext_obc", "pickup", "flavor"]);
 const SRC_LABEL = { takumi: "官网新闻", mys: "米游社", bili: "B站" };
 const KIND_LABEL = { weapon: "武器", artifact: "圣遗物套装", food: "料理", material: "材料" };
 
@@ -143,8 +149,14 @@ function searchCorpus(corpus, terms, base) {
       aliasHits.some((t) => weights.get(t).df <= 5);
     results.push({ doc, via: uniq, score: uniq.reduce((a, t) => a + weights.get(t).idf, 0), strong });
   }
-  results.sort((a, b) => b.score - a.score || a.doc - b.doc);
+  results.sort((a, b) => lowRank(corpus, a.doc) - lowRank(corpus, b.doc) ||
+    b.score - a.score || a.doc - b.doc);
   return { results, weights };
+}
+
+function lowRank(corpus, doc) {
+  const ty = corpus.tbl.ty[corpus.cols[0][doc]];
+  return LOW_TIERS.has(ty) ? 1 : 0;
 }
 
 function el(tag, cls, text) {

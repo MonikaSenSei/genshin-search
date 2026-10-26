@@ -348,25 +348,103 @@ def main():
                       btc.execute("SELECT book, title FROM book_titles")}
         print(f"  book titles: {len(book_title)} joined")
     rd = os.path.join(args.repo, "Readable", "CHS")
+    # M4.12 relabel (scripts/relabel_readable.py): unnamed readable files get
+    # grounded names (weapon/relic id tables, 观测枢 map-text channel join) or
+    # category labels; dev-residue files (image-only, test strings, ???) drop.
+    plabel = {}
+    pl_path = os.path.join(ROOT, "data", "pickup_labels.json")
+    if os.path.exists(pl_path):
+        plabel = json.load(open(pl_path, encoding="utf-8"))
+        print(f"  readable relabel entries: {len(plabel)}")
+    n_book_junk = 0
     for fn in sorted(os.listdir(rd)):
         if not fn.endswith(".txt"):
             continue
         book = fn[:-4]
-        title = book_title.get(book, book)
-        label = f"书籍:{title}"
-        # Title card: book titles live only in the (now-dead) official title
-        # table, so no book's own text contains its title — without this doc,
-        # searching a title could never return the book itself. Kept as a
-        # separate doc so body text stays verbatim. Card text is exactly the
-        # title (verified unique across all joined books; if two books ever
-        # share a title, dedup in build/query would drop one — add a unique
-        # invisible suffix then).
-        if book in book_title:
-            emit("book_title", f"《{title}》", label)
         with open(os.path.join(rd, fn), encoding="utf-8") as f:
             content = f.read()
+        pl = plabel.get(book)
+        if pl is not None:
+            if pl.get("junk"):
+                n_book_junk += 1
+                continue
+            label = str(pl["label"])
+            ctype = str(pl.get("ctype", "pickup"))
+            if ctype == "maptext":
+                # name card like book_title: the joined title lives only in
+                # the label, so without this doc the name could never be hit
+                emit("maptext_title", label[len("世界文书:"):], label)
+        else:
+            title = book_title.get(book, book)
+            label = f"书籍:{title}"
+            ctype = "book"
+            # Title card: book titles live only in the (now-dead) official title
+            # table, so no book's own text contains its title — without this doc,
+            # searching a title could never return the book itself. Kept as a
+            # separate doc so body text stays verbatim. Card text is exactly the
+            # title (verified unique across all joined books; if two books ever
+            # share a title, dedup in build/query would drop one — add a unique
+            # invisible suffix then).
+            if book in book_title:
+                emit("book_title", f"《{title}》", label)
         for para in split_blocks(content):
-            emit("book", para, label)
+            emit(ctype, para, label)
+    print(f"  dev-residue book files filtered: {n_book_junk}")
+
+    # 3b) Injected books (scripts/obc_book_inject.py rows: 观测枢-transcribed
+    # volumes that the dump lacks; body text comes from the OBC raw cache).
+    inj_keys = {k: t for k, t in book_title.items() if k.startswith("inject:")}
+    if inj_keys:
+        raw_books = os.path.join(ROOT, "data", "obc_books_raw.json")
+        if os.path.exists(raw_books):
+            obc_raw = json.load(open(raw_books, encoding="utf-8"))
+            n_inj = 0
+            for key, title in sorted(inj_keys.items()):
+                _, eid, vi = key.split(":")
+                try:
+                    mod = obc_raw[eid]["modules"][int(vi)]
+                except (KeyError, IndexError):
+                    print(f"  inject MISSING in raw cache: {key} {title}")
+                    continue
+                blabel = f"书籍:{title}"
+                emit("book_title", f"《{title}》", blabel)
+                for para in split_blocks(mod.get("text") or ""):
+                    emit("book_obc", para, blabel)
+                    n_inj += 1
+            print(f"  injected OBC-transcribed books: {len(inj_keys)} ({n_inj} blocks emitted)")
+
+    # 3c) Map-text injection: 观测枢 地图文本 entries with no dump text at all
+    # (scene-object texts the data dumps never shipped). Community
+    # transcription -> own corpus type, ranked last by the frontend.
+    mt_dir = os.path.join(ROOT, "data", "obc_maptext_raw")
+    if os.path.isdir(mt_dir):
+        matched_eids = set()
+        mt_match = os.path.join(ROOT, "data", "maptext_match.json")
+        if os.path.exists(mt_match):
+            matched_eids = {v["eid"] for v in json.load(open(mt_match, encoding="utf-8")).values()}
+        n_mt = 0
+        for fn in sorted(os.listdir(mt_dir)):
+            if not fn.endswith(".json"):
+                continue
+            rec = json.load(open(os.path.join(mt_dir, fn), encoding="utf-8"))
+            if rec["id"] in matched_eids:
+                continue  # its dump text is already indexed under 世界文书
+            text = rec.get("text") or ""
+            # drop leading community annotations (availability/branch notes)
+            lines = text.splitlines()
+            i = 0
+            while i < len(lines) and re.match(
+                    r"^\s*（[^（）]*(需要|仅|选项|点位|截图|位置|出现|注[:：])[^（）]*）\s*$", lines[i]):
+                i += 1
+            text = "\n".join(lines[i:]).strip()
+            if len(re.sub(r"[^\u4e00-\u9fff0-9a-zA-Z]", "", text)) < 10:
+                continue
+            label = f"世界文书:{rec['title']}"
+            emit("maptext_title", rec["title"], label)
+            for para in split_blocks(text):
+                emit("maptext_obc", para, label)
+                n_mt += 1
+        print(f"  injected 观测枢 map-text docs: {n_mt} blocks")
 
     # 4) Subtitles
     sd = os.path.join(args.repo, "Subtitle", "CHS")

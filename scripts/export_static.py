@@ -270,10 +270,37 @@ def main():
             return ""
         return quest_bracket_url(tail)
 
-    src_url = [title_url.get(v[3:], "") if v.startswith("书籍:") else
-               (quest_bracket_url(v[2:]) if v.startswith("任务「")
-                else quest_label_url(v))
-               for v in src_tbl]
+    # M4.12: 世界文书: labels joined to 观测枢 map-text entries and 物品故事:
+    # labels named via weapon/relic id tables carry their verified URLs
+    # (data/pickup_labels.json + data/maptext_urls.json, HEAD-verified).
+    plabel_url = {}
+    pl_path = os.path.join(ROOT, "data", "pickup_labels.json")
+    if os.path.exists(pl_path):
+        for v in json.load(open(pl_path, encoding="utf-8")).values():
+            if v.get("url") and v.get("label"):
+                plabel_url.setdefault(v["label"], v["url"])
+    mt_path = os.path.join(ROOT, "data", "maptext_urls.json")
+    mt_raw = os.path.join(ROOT, "data", "obc_maptext_raw")
+    if os.path.exists(mt_path) and os.path.isdir(mt_raw):
+        mtv = json.load(open(mt_path, encoding="utf-8"))
+        for fn in os.listdir(mt_raw):
+            eid = fn[:-5]
+            e = mtv.get(eid)
+            if not e or not e.get("ok"):
+                continue
+            rec = json.load(open(os.path.join(mt_raw, fn), encoding="utf-8"))
+            plabel_url.setdefault(f"世界文书:{rec['title']}", e["url"])
+
+    def label_jump(v):
+        if v.startswith("书籍:"):
+            return title_url.get(v[3:], "")
+        if v.startswith("世界文书:") or v.startswith("物品故事:"):
+            return plabel_url.get(v, "")
+        if v.startswith("任务「"):
+            return quest_bracket_url(v[2:])
+        return quest_label_url(v)
+
+    src_url = [label_jump(v) for v in src_tbl]
     print(f"src jump URLs: {sum(1 for u in src_url if u)} / {len(src_tbl)} source labels")
 
     # per-doc jump URLs (viewpoint descs have no per-source label: the join

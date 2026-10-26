@@ -102,7 +102,19 @@ export_static.py：任务标签挂 src_url 三种形态——任务「X」直接
 实测（本地）：「踏鞴物语·终幕」mainquest 卡→content/2394（系列继承）；「三十人团」的招募→7647、「月莲杯」的初战→505553（「」段 join）；提到任务名的普通对白无按钮。
 cron 步骤 4 已加 obc_quests.py（join+全量 HEAD）；步骤 6 发布成功后 git add/commit/push（此前 daily 数据提交不会自动进 GitHub，已修）。
 阻塞（2026-10-26 04:20）：Netlify 返回 403『Account credit usage exceeded - new deploys are blocked until credits are added』——站点现网正常（仍为 M4.10 版），M4.11 数据已 commit+push 到 GitHub。账号=新 credits 制（nf_team_dev，300 credits/周期，API 无明细端点，usage API 404），消耗元凶已查明=导出字节非确定性（gzip 嵌 mtime）导致每日重发全量重传 ~50MB；已修（mtime=0，双跑 md5 一致）。【用户决定（最终规则）：项目正式完工前一律不发布 Netlify，完工后由用户提醒才发布；在此之前日常只 commit+push GitHub + 本地预览验证，维护 cron 无发布步骤。】
-下一对话可做：方向 3=占位书 OBC 正文注入（31 本）。
+下一对话可做：方向 3=占位书 OBC 正文注入（31 本）。【已做，见 M4.12】
+
+## M4.12 占位书注入 + 地图文本层 + 未接名层重标注（2026-10-27，本地完成，未发布）
+用户口径（本轮对话确定）：书籍层以观测枢为准（93 系列书单），观测枢没有的不补；BWiki 独有 8 本保留不删；未接名的 Readable 不得以 BookNNN 示人，改真实名称（优先，含位置）或类别名；开发残留过滤；这一层在结果里整体降权排后。
+盘点结论（先于动工实测）：31 个占位文件里只有 14 本是 BookNNN（其余 17 个是武器/圣遗物/风之翼 flavor 文件）；这 14 本正文为空/？？？，CHS/EN/JP 全无文本，且 dump 三条命名路（Reading/772NNN 物件名/Gadget）全部解析不出名字——占位书接不回。真实可注入的是另一组：观测枢书籍频道 join 后仍无对应 dump 正文的卷，且必须是真实世界可读书（验证=717 系书籍场景物件名 GadgetExcel+TextMap，data/book_gadget_names.json 533 个）。
+①书籍注入 scripts/obc_book_inject.py：5 卷（古老的考察日志·其之一[原名带'.其之一'照录观测枢]、其之二、残破的笔记、风、勇气和翅膀、林间风·故事拔萃节选）。写 book_titles.db 合成键行 inject:<eid>:<vi>（source='obc'→自动获得书名卡片+跳转）；正文由 build_index 从 data/obc_books_raw.json 注入，corpus_type='book_obc'（标签「书籍（观测枢转录）」，不降权）。白之公主六侏儒各卷(28-43字引用行)自动判为 stub 不注入。
+②地图文本层（用户要求的“世界拾取物+位置”）：观测枢 图鉴>地图文本 频道=251，706 词条，每词条=文档名+【区域】+交互文本全文+关联任务链接。scripts/obc_maptext.py：列表缓存 data/obc_channel_251.json、逐条缓存 data/obc_maptext_raw/<id>.json（可续传）、--join=锚点预筛+包含/6-gram 容错匹配→data/maptext_match.json（实测 205/706 命中 dump Readable、歧义 1 剔除）、--verify=全量 HEAD→data/maptext_urls.json（ok 才出跳转）。关键发现：未匹配的 501 条里随机 60 条在索引任何标签下都不存在——这批世界文本 dump 根本没有；build_index 3c 段直接注入（剥除行首社区注释行，corpus_type='maptext_obc'，实测注入 1420 段），已匹配 205 条改标签 世界文书:<名称含区域>（正文仍是 dump 原文，corpus_type='maptext'）。
+③其余未接名 Readable（1626 文件）：scripts/relabel_readable.py→data/pickup_labels.json。命名链：WeaponNNN 文件名数字=官方武器 ID→WeaponExcelConfigData→TextMap（248 本接名，如 斫峰之刃）；RelicNNN_x 文本包含进 obc_items.json 圣遗物套装 story（232 本接名，如 回声之林夜话）；接不上名的按内容分类（杂记 451/残句 98/诗 59/剧本 35/信件 28/日记 17/告示 1）标 世界文书:未收录·<类别>（ctype='pickup'）；武器/圣遗物/衣装接不上名的标 物品故事:未收录·<类>（ctype='flavor'）。跳转=卡层 data/obc_items.json 名称精确 join（与物品栏词条同源）。开发残留过滤 155 文件（纯 <image> 壳/（test）/？？？/<8 字）。
+④降权：app.js LOW_TIERS={maptext,maptext_obc,pickup,flavor} 在 searchCorpus 排序里整层置后（strong/weak 内部同理）；query.py 同步（两端语义一致保持）。TYPE_LABEL 新增：书籍（观测枢转录）/世界文书/世界文书（观测枢转录）/世界文书（未收录）/物品故事。书名匹配栏不含世界文书（只扫 book_titles）。
+export_static：src_url 改为 label_jump()，新增 世界文书:/物品故事: 前缀→data/pickup_labels.json + maptext_urls.json(仅 ok)。索引 385,962→388,062（+注入书 10 段+书名卡 5+地图文本 1420 段+世界文书条目卡 683-过滤 155 文件的段）。控制词 坎瑞亚 358 篇（+3=新注入文本合法命中），与旧库差异仅限新增层。
+cron 变更：步骤 4 增加 obc_maptext.py（续抓）+ --verify + relabel_readable.py（新 pickup_labels 在下次索引重建生效）。
+实测（本地预览 2026-10-27）：「字迹潦草的手记」→世界文书条目卡【蓝珀湖】+跳转（706/706 URL 全存活）；「残破的笔记」→书名卡+注入正文（暝垣山/废弃避难所两处）；「吉约丹」→主层在前、世界文书被压出前 12 名；BookNNN 标签在索引中 0 残留（仅 textmap 原始 source 保留）；开发残留过滤 155 文件。索引 385,962→388,062。
+已知遗留：world-doc 名称卡只有标题+跳转，点开后本地正文需另搜内容词（OBC 跳转页含全文，够用）；带前缀的标题如「第一份蒸汽鸟报」按前缀整体成 token，搜“蒸汽鸟报”命不中该卡片（CJK 分词既有特性）；relabel 分类器是启发式（类别名可能个别不准，属标签非正文，影响小）；地图文本 501 条未匹配中还有少量同文不同点位变体（歧义 1 条已剔除）；世界文书没有书名匹配栏（搜标题词只能靠正文含标题的少数情况）——如要可加“世界文书匹配”栏，未做。
 
 ## （旧计划存档）观测枢接入预案
 跳转原文 + 书名接回的源改为**观测枢 Wiki**（米游社原神版块→观测·Wiki，https://baike.mihoyo.com/ys/obc/ ，官方托管+玩家协作，国内直连实测 200）。已验证：搜「野猪公主」有词条，URL 形态 `baike.mihoyo.com/ys/obc/content/<数字id>/detail`（注意是数字 ID，非书名 slug）。步骤：

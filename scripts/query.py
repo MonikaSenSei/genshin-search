@@ -124,10 +124,13 @@ def main():
             weights[t][1] <= 5 for t in alias_hits)
         r["strong"] = bool(strong)
 
+    # M4.12 rank rule (mirrors web/app.js LOW_TIERS): world docs / item
+    # stories / wiki transcriptions rank below the main corpus.
+    LOW_TIERS = {"maptext", "maptext_obc", "pickup", "flavor"}
     strong = sorted([r for r in results.values() if r["strong"]],
-                    key=lambda r: -r["score"])[:args.limit]
+                    key=lambda r: (r["corpus_type"] in LOW_TIERS, -r["score"]))[:args.limit]
     weak = sorted([r for r in results.values() if not r["strong"]],
-                  key=lambda r: -r["score"])[:args.weak_limit]
+                  key=lambda r: (r["corpus_type"] in LOW_TIERS, -r["score"]))[:args.weak_limit]
 
     sem = []
     if args.semantic:
