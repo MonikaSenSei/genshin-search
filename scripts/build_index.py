@@ -369,6 +369,14 @@ def main():
     def clean_q_label(raw):
         """same cleaning for raw qe source strings (orphan pass)."""
         return proven_join([], [], -1, extra=raw) or "出处未定"
+
+    def orphan_class(lab):
+        """type tag for a talk-registry doc: follows the resolved context."""
+        if lab.startswith("未上线"):
+            return "unreleased"
+        if re.search(r"任务|对话|活动|物件|故事板|地脉|剧情|过场", lab):
+            return "quest"  # QE runtime text of some quest context
+        return "unreferenced"  # only honest when the source is 出处未定
     for mid, rl in refs.items():
         text = tm.get(str(mid)) or ""
         if not text.strip():
@@ -417,7 +425,11 @@ def main():
             continue  # dev scaffolding memos (test/unreleased quests)
         q = qe.get(int(k))
         if q:
-            emit("textmap:unreferenced", s, clean_q_label(q[0]), q[1], "")
+            lab = clean_q_label(q[0])
+            # "not referenced by a story table" is an internal pipeline fact,
+            # never a user-facing tag: when the talk registry DID resolve a
+            # real context, the type tag follows that context instead
+            emit("textmap:" + orphan_class(lab), s, lab, q[1], "")
         else:
             emit("textmap:unreferenced", s, "出处未定")
         orphans_kept += 1

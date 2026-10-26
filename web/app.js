@@ -13,6 +13,7 @@ const TYPE_LABEL = {
   "textmap:item": "物品", "textmap:gadget": "环境物件", "textmap:food": "食物",
   "textmap:book": "书籍条目", "book": "书籍正文", "book_title": "书名条目", "subtitle": "过场字幕",
   "textmap:unreferenced": "未引用文本",
+  "textmap:unreleased": "未上线文本",
   "book_obc": "书籍（观测枢转录）", "maptext": "世界文书", "maptext_obc": "世界文书（观测枢转录）",
   "maptext_title": "世界文书条目",
   "pickup": "世界文书（未收录）", "flavor": "物品故事",
