@@ -166,7 +166,12 @@ def main():
         if not h or not medium:
             return ""
         t = medium.get(str(h)) or tm.get(str(h))
-        return (t or "").strip()
+        t = (t or "").strip()
+        # some NPC/gadget "names" in TextMap are host placeholders
+        # (#{REALNAME[ID(n)|HOSTONLY/SHOWHOST(...)]}) -> that IS the Traveler
+        if re.fullmatch(r"#?\{REALNAME\[[^{}]*\}", t) or re.fullmatch(r"#?\{REALNAME\[[^{}]*\}\}", t):
+            return "旅行者"
+        return t
 
     npc_name = {}
     for r in load_json(os.path.join(ebi, "NpcExcelConfigData.json")) or []:
@@ -305,13 +310,31 @@ def main():
             n_speaker += 1
         stats[(corpus_type, source != "出处未定")] += 1
 
+    # qe provenance map (scripts/resolve_qe.py): textmap id -> best talk
+    # context label. Loaded early: it also enriches referenced dialogue docs.
+    qe = {}
+    qpath = os.path.join(ROOT, "index", "qe_src.db")
+    if os.path.exists(qpath):
+        qc = sqlite3.connect(qpath)
+        qe = {r[0]: (r[1], r[2]) for r in
+              qc.execute("SELECT id, source, speaker FROM qe")}
+        print(f"  qe provenance map: {len(qe)} ids")
+
     # 1) TextMap ids referenced by story tables
+    dev_marker = re.compile(r"\$UNRELEASED|\$HIDDEN|[（(]\s*(?:test|hide)\s*[)）]", re.I)
+    proven_prefix = re.compile(
+        r"^(任务|活动|多人任务|未上线|NPC|自由|物件|故事板|地脉|剧情|过场)")
     for mid, rl in refs.items():
         text = tm.get(str(mid)) or ""
         if not text.strip():
             continue
         classes = sorted({c for c, _ in rl})
-        labels = [lbl for _, lbl in rl if lbl]
+        raw_labels = [lbl for _, lbl in rl if lbl]
+        labels = [lbl for lbl in raw_labels if not dev_marker.search(lbl)]
+        if raw_labels and not labels:
+            continue  # only referenced by dev/test quests -> dev residue
+        if "$HIDDEN" in text or "$UNRELEASED" in text:
+            continue
         src = None
         spk = ""
         cast = ""
@@ -322,22 +345,29 @@ def main():
                 chain_cast |= cast_of.get(chain_of.get(did), set())
             chain_cast.discard(None)
             cast = "、".join(sorted(chain_cast)[:8])
-            src = "对白（在场）"
+            # provenance: a titled table's row label (main quest), or the
+            # best talk-file context label from the qe map. When provenance
+            # is known it replaces the generic 对白（在场） placeholder —
+            # the card's type tag already says 对白.
+            proven = list(dict.fromkeys(labels))
+            q = qe.get(mid)
+            if q and q[0]:
+                proven += [x for x in q[0].split("｜") if x and x != "出处未定"]
+            proven = proven[:2]
+            if proven:
+                src = "、".join(
+                    l if proven_prefix.match(l) else "「%s」" % l
+                    for l in proven)
+            else:
+                src = "对白（在场）"
         if src is None:
             tag = ",".join(classes)
             src = f"{tag}" + (f"｜{'、'.join(sorted(set(labels))[:3])}" if labels else "")
         emit("textmap:" + ",".join(classes), text, src, spk, cast)
 
-    # 2) orphan story-looking text (QE-script dialogue etc.). BinOutput/Talk
-    # backfill (scripts/resolve_qe.py -> index/qe_src.db) gives most of them a
-    # real quest/npc provenance + speaker; the rest stays honestly 出处未定.
-    qe = {}
-    qpath = os.path.join(ROOT, "index", "qe_src.db")
-    if os.path.exists(qpath):
-        qc = sqlite3.connect(qpath)
-        qe = {r[0]: (r[1], r[2]) for r in
-              qc.execute("SELECT id, source, speaker FROM qe")}
-        print(f"  qe provenance map: {len(qe)} ids")
+    # 2) orphan story-looking text (QE-script dialogue etc.). The qe map
+    # loaded above gives most of them a real quest/npc provenance + speaker;
+    # the rest stays honestly 出处未定.
     orphans_kept = 0
     for k, v in tm.items():
         if int(k) in refs:
@@ -345,6 +375,8 @@ def main():
         s = v.strip()
         if len(s) < 6 or not re.search(r"[。！？…]", s):
             continue
+        if "$HIDDEN" in s or "$UNRELEASED" in s:
+            continue  # dev scaffolding memos (test/unreleased quests)
         q = qe.get(int(k))
         if q:
             emit("textmap:unreferenced", s, q[0], q[1], "")
@@ -383,15 +415,15 @@ def main():
             if pl.get("junk"):
                 n_book_junk += 1
                 continue
-            label = str(pl["label"])
+            srclabel = str(pl["label"])
             ctype = str(pl.get("ctype", "pickup"))
             if ctype == "maptext":
                 # name card like book_title: the joined title lives only in
                 # the label, so without this doc the name could never be hit
-                emit("maptext_title", label[len("世界文书:"):], label)
+                emit("maptext_title", srclabel[len("世界文书:"):], srclabel)
         else:
             title = book_title.get(book, book)
-            label = f"书籍:{title}"
+            srclabel = f"书籍:{title}"
             ctype = "book"
             # Title card: book titles live only in the (now-dead) official title
             # table, so no book's own text contains its title — without this doc,
@@ -401,9 +433,9 @@ def main():
             # share a title, dedup in build/query would drop one — add a unique
             # invisible suffix then).
             if book in book_title:
-                emit("book_title", f"《{title}》", label)
+                emit("book_title", f"《{title}》", srclabel)
         for para in split_blocks(content):
-            emit(ctype, para, label)
+            emit(ctype, para, srclabel)
     print(f"  dev-residue book files filtered: {n_book_junk}")
 
     # 3b) Injected books (scripts/obc_book_inject.py rows: 观测枢-transcribed
@@ -454,21 +486,32 @@ def main():
             text = "\n".join(lines[i:]).strip()
             if len(re.sub(r"[^\u4e00-\u9fff0-9a-zA-Z]", "", text)) < 10:
                 continue
-            label = f"世界文书:{rec['title']}"
-            emit("maptext_title", rec["title"], label)
+            srclabel = f"世界文书:{rec['title']}"
+            emit("maptext_title", rec["title"], srclabel)
             for para in split_blocks(text):
-                emit("maptext_obc", para, label)
+                emit("maptext_obc", para, srclabel)
                 n_mt += 1
         print(f"  injected 观测枢 map-text docs: {n_mt} blocks")
 
-    # 4) Subtitles
+    # 4) Subtitles. resolve_qe.py pre-resolves asset names that embed quest
+    # numbers (subs table); others keep the honest asset-name label.
+    subs_src = {}
+    if os.path.exists(qpath):
+        sc = sqlite3.connect(qpath)
+        try:
+            subs_src = {r[0]: r[1] for r in
+                        sc.execute("SELECT asset, source FROM subs")}
+            print(f"  subtitle provenance map: {len(subs_src)} assets")
+        except sqlite3.OperationalError:
+            pass  # older qe_src.db without subs
     sd = os.path.join(args.repo, "Subtitle", "CHS")
     for fn in sorted(os.listdir(sd)):
         if not fn.endswith(".srt"):
             continue
         sub = fn[:-4]
+        label = subs_src.get(sub, f"字幕:{sub}")
         for text in parse_srt(os.path.join(sd, fn)):
-            emit("subtitle", text, f"字幕:{sub}")
+            emit("subtitle", text, label)
 
     db.commit()
     total = db.execute("SELECT count(*) FROM docs").fetchone()[0]
