@@ -116,6 +116,13 @@ cron 变更：步骤 4 增加 obc_maptext.py（续抓）+ --verify + relabel_rea
 实测（本地预览 2026-10-27）：「字迹潦草的手记」→世界文书条目卡【蓝珀湖】+跳转（706/706 URL 全存活）；「残破的笔记」→书名卡+注入正文（暝垣山/废弃避难所两处）；「吉约丹」→主层在前、世界文书被压出前 12 名；BookNNN 标签在索引中 0 残留（仅 textmap 原始 source 保留）；开发残留过滤 155 文件。索引 385,962→388,062。
 已知遗留：world-doc 名称卡只有标题+跳转，点开后本地正文需另搜内容词（OBC 跳转页含全文，够用）；带前缀的标题如「第一份蒸汽鸟报」按前缀整体成 token，搜“蒸汽鸟报”命不中该卡片（CJK 分词既有特性）；relabel 分类器是启发式（类别名可能个别不准，属标签非正文，影响小）；地图文本 501 条未匹配中还有少量同文不同点位变体（歧义 1 条已剔除）；世界文书没有书名匹配栏（搜标题词只能靠正文含标题的少数情况）——如要可加“世界文书匹配”栏，未做。
 
+## M4.13 生物图鉴命名接回（2026-10-27，本地）
+用户问题：『图鉴为什么没有名字』——AnimalCodex 行只有 descTextMapHash，生物/机关显示名（nameTextMapHash）在 dump 的所有 TextMap（CHS/EN/Medium）里都不存在（实测 3501653553 等 0 命中），出处只能落裸 'codex' 标签。观测枢敌人频道（channel 6）词条=真名标题+good_desc/collapse_panel 含同一份游戏图鉴原文，按描述文本 join 可接名+跳转。
+scripts/obc_creatures.py：列表用已有 data/obc_channel_6.json（417 去重条目，与 creatures.bin 同源），逐条缓存 data/obc_creatures_raw/<id>.json（可续传）；--join：AnimalCodex desc 原文 ↔ 词条文本（12字锚点预筛+包含/6-gram≥0.9），→data/codex_match.json {descHash:{name,id,url,ok}}，HEAD 内置（--verify-only 仅复核）。实测 574 段本地图鉴文 217 段接名（未接=观测枢未收录的区域变体/亚种等）、0 歧义、0 死链。
+build_index：scan_table 增加 codex_names（descTextMapHash→name），label_for 失败时兜底——出处变 'codex｜烈焰史莱姆' 形态。export_static：label_jump 增 'codex｜' 前缀→codex_match（仅 ok）。
+未接的保持裸 'codex'（诚实标注）。cron：步骤4 增加 obc_creatures.py（续抓）+ --verify-only。
+实测（本地预览 2026-10-27）：用户原卡「最早设计制造的新式发条机械…」出处现为 图鉴 codex｜机关·侦察记录型 + 观测枢跳转（6991/6982 实测在结果里）；索引内 215 段图鉴文带真名标签，其余（观测枢未收录的变体/亚种）保持裸 codex。
+
 ## （旧计划存档）观测枢接入预案
 跳转原文 + 书名接回的源改为**观测枢 Wiki**（米游社原神版块→观测·Wiki，https://baike.mihoyo.com/ys/obc/ ，官方托管+玩家协作，国内直连实测 200）。已验证：搜「野猪公主」有词条，URL 形态 `baike.mihoyo.com/ys/obc/content/<数字id>/detail`（注意是数字 ID，非书名 slug）。步骤：
 1. 找它的搜索/分类数据接口（页面是 SPA，HTML 全是壳；search 接口和书籍分类目录接口待逆向）。

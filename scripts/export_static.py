@@ -291,11 +291,22 @@ def main():
             rec = json.load(open(os.path.join(mt_raw, fn), encoding="utf-8"))
             plabel_url.setdefault(f"世界文书:{rec['title']}", e["url"])
 
+    # creature-codex labels (codex｜<name>) -> OBC enemy entry (M4.13,
+    # scripts/obc_creatures.py join, HEAD-verified in codex_match.json)
+    codex_url = {}
+    cx_path = os.path.join(ROOT, "data", "codex_match.json")
+    if os.path.exists(cx_path):
+        for r in json.load(open(cx_path, encoding="utf-8")).values():
+            if r.get("ok") and r.get("url") and r.get("name"):
+                codex_url.setdefault(r["name"], r["url"])
+
     def label_jump(v):
         if v.startswith("书籍:"):
             return title_url.get(v[3:], "")
         if v.startswith("世界文书:") or v.startswith("物品故事:"):
             return plabel_url.get(v, "")
+        if v.startswith("codex｜"):
+            return codex_url.get(v[len("codex｜"):], "")
         if v.startswith("任务「"):
             return quest_bracket_url(v[2:])
         return quest_label_url(v)

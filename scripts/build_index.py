@@ -56,11 +56,12 @@ def load_textmap(repo):
         return json.load(f)
 
 
-def scan_table(path, tm_keys, tm):
+def scan_table(path, tm_keys, tm, codex_names=None):
     """Return set of (textmap_id, provenance_detail)."""
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
     out = set()
+    codex_names = codex_names or {}
 
     def label_for(row):
         for k, v in row.items():
@@ -72,6 +73,13 @@ def scan_table(path, tm_keys, tm):
 
     def handle_row(row):
         lbl = label_for(row)
+        if lbl is None and isinstance(row, dict):
+            # creature-codex rows have no in-dump name (the display-name
+            # hashes are absent from every TextMap); names come from the
+            # OBC enemy-entry join (scripts/obc_creatures.py).
+            h = row.get("descTextMapHash")
+            if h:
+                lbl = codex_names.get(str(h))
         ids = set()
 
         def walk(o):
@@ -116,6 +124,13 @@ def main():
     print(f"  {len(tm)} entries")
 
     print("reverse-scanning story tables...")
+    codex_names = {}
+    cpath = os.path.join(ROOT, "data", "codex_match.json")
+    if os.path.exists(cpath):
+        codex_names = {h: r["name"] for h, r in
+                       json.load(open(cpath, encoding="utf-8")).items()
+                       if r.get("ok")}
+        print(f"  codex entry names (OBC-verified): {len(codex_names)}")
     refs = defaultdict(list)  # textmap_id -> [(class, label)]
     per_table = Counter()
     ebi = os.path.join(args.repo, "ExcelBinOutput")
@@ -231,7 +246,7 @@ def main():
         if cls is None:
             continue
         try:
-            found = scan_table(os.path.join(ebi, fn), tm_keys, tm)
+            found = scan_table(os.path.join(ebi, fn), tm_keys, tm, codex_names)
         except Exception as e:
             print(f"  !! {fn}: {e}", file=sys.stderr)
             continue
