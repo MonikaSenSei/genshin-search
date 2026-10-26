@@ -78,7 +78,18 @@ async function loadGame(onProgress) {
   const blob = new TextDecoder("utf-8").decode(sec(1));
   const cols = [reinterp(sec(2), Uint8Array), reinterp(sec(3), Uint16Array),
                 reinterp(sec(4), Uint16Array), reinterp(sec(5), Uint16Array)];
-  state.g = { n: header.n, offs, blob, cols, tbl: header };
+  // char-pair frequency table (pairs uint32 + counts uint16): lets the
+  // scorer demote word-boundary glue hits (警长|正在 contains 长正)
+  let bg = null;
+  if (header.bgN > 0) {
+    const raw = sec(6);
+    const n = header.bgN;
+    const pairs = new Uint32Array(raw.buffer.slice(raw.byteOffset, raw.byteOffset + n * 4));
+    const counts = new Uint16Array(raw.buffer.slice(raw.byteOffset + n * 4, raw.byteOffset + raw.byteLength));
+    bg = new Map();
+    for (let i = 0; i < n; i++) bg.set(pairs[i], counts[i]);
+  }
+  state.g = { n: header.n, offs, blob, cols, tbl: header, bg };
 }
 
 async function loadSocial(onProgress) {
@@ -97,30 +108,69 @@ function bisectDoc(offs, pos) {
   return offs[lo] <= pos && pos < offs[lo + 1] - 1 ? lo : -1;
 }
 
-function findDocs(blob, offs, term, hits) {
+const ADDR_SUFFIX = /^(大人|先生|女士|小姐|将军|队长|团长|参谋|骑士|武士|前辈|师父|师傅|殿下|公子|管家|执事|老师)/;
+const isCJKCode = (c) => c >= 0x4E00 && c <= 0x9FFF;
+
+function findDocs(corpus, term, hits, quality) {
   // Index tokenizer ignores punctuation/whitespace between chars (FTS5
   // single-char CJK), so exact-substring and tolerant-regex results are
   // unioned; both count each doc once.
+  // Quality tracking (user rule 2026-10): a hit whose every occurrence is
+  // CJK-glued on both sides and whose right context is a much more common
+  // pair (正在 ≫ 长正) is a cross-word accident (警长|正在) -> demoted.
+  const blob = corpus.blob, offs = corpus.offs;
   const docs = new Set();
-  const add = (pos) => {
-    const d = bisectDoc(offs, pos);
-    if (d >= 0 && !docs.has(d)) {
-      docs.add(d);
-      let s = hits.get(d); if (!s) hits.set(d, s = new Set());
-      s.add(term);
-    }
+  const dem = new Set(); // docs whose every occurrence of term is glue-suspect
+  let occ = 0;
+  const touch = (d) => {
+    docs.add(d);
+    let s = hits.get(d); if (!s) hits.set(d, s = new Set());
+    s.add(term);
+    if (!quality.has(d)) quality.set(d, new Map());
+    if (!quality.get(d).has(term)) quality.get(d).set(term, { clean: false, maxPair: 0 });
+    return quality.get(d).get(term);
   };
   let pos = blob.indexOf(term);
-  while (pos >= 0) { add(pos); pos = blob.indexOf(term, pos + term.length); }
+  while (pos >= 0) {
+    occ++;
+    const d = bisectDoc(offs, pos);
+    if (d >= 0) {
+      const st = touch(d);
+      const prevC = pos > 0 ? blob.charCodeAt(pos - 1) : 0;
+      const nIdx = pos + term.length;
+      const nextC = nIdx < blob.length ? blob.charCodeAt(nIdx) : 0;
+      if (!(isCJKCode(prevC) && isCJKCode(nextC)) ||
+          ADDR_SUFFIX.test(blob.slice(nIdx, nIdx + 3))) {
+        st.clean = true;
+      } else if (term.length > 1 && corpus.bg) {
+        const f = corpus.bg.get(term.charCodeAt(term.length - 1) << 16 | nextC) || 0;
+        if (f > st.maxPair) st.maxPair = f;
+      } else {
+        st.clean = true;
+      }
+    }
+    pos = blob.indexOf(term, pos + term.length);
+  }
   const re = term.length > 1 ? tolerantRegex(term) : null;
   if (re) {
     let m;
     while ((m = re.exec(blob))) {
-      add(m.index);
+      // only a real whitespace gap counts as wrap-recall; a zero-gap match
+      // is the exact occurrence already classified above
+      if (m[0].length > term.length) {
+        const d = bisectDoc(offs, m.index);
+        if (d >= 0) touch(d).clean = true;
+      }
       if (re.lastIndex === m.index) re.lastIndex++;
     }
   }
-  return docs.size;
+  if (corpus.bg && term.length > 1) {
+    for (const [d, m] of quality) {
+      const st = m.get(term);
+      if (st && !st.clean && st.maxPair >= 500 && occ <= 0.1 * st.maxPair) dem.add(d);
+    }
+  }
+  return { df: docs.size, occ, dem };
 }
 
 function tolerantRegex(term) {
@@ -135,9 +185,11 @@ function tolerantRegex(term) {
 
 function searchCorpus(corpus, terms, base) {
   const N = corpus.n, hits = new Map(), weights = new Map();
+  const quality = new Map(); // doc -> term -> {clean, maxPair}
   for (const t of terms) {
-    const df = findDocs(corpus.blob, corpus.offs, t, hits);
-    weights.set(t, { idf: Math.log2(N / (df + 1)), df });
+    const info = findDocs(corpus, t, hits, quality);
+    weights.set(t, { idf: Math.log2(N / (info.df + 1)), df: info.df,
+                     dem: info.dem });
   }
   // Title matches now live in their own top section (renderTitleMatches);
   // the game list keeps plain IDF ranking, with title-card docs suppressed
@@ -145,10 +197,18 @@ function searchCorpus(corpus, terms, base) {
   const results = [];
   for (const [doc, set] of hits) {
     const uniq = [...set];
+    const demoted = (t) => weights.get(t).dem.has(doc);
     const aliasHits = uniq.filter((t) => t !== base);
-    const strong = uniq.includes(base) || aliasHits.length >= 2 ||
-      aliasHits.some((t) => weights.get(t).df <= 5);
-    results.push({ doc, via: uniq, score: uniq.reduce((a, t) => a + weights.get(t).idf, 0), strong });
+    const cleanAliases = aliasHits.filter((t) => !demoted(t));
+    // word-boundary glue (警长|正在 for a name query) gets 0.35x weight and
+    // never holds a doc up in the strong tier by itself
+    const strong = (uniq.includes(base) && !demoted(base)) ||
+      cleanAliases.length >= 2 ||
+      cleanAliases.some((t) => weights.get(t).df <= 5);
+    results.push({ doc, via: uniq, strong,
+      demoted: uniq.includes(base) && demoted(base),
+      score: uniq.reduce((a, t) => a + (demoted(t) ? weights.get(t).idf * 0.35
+                                                   : weights.get(t).idf), 0) });
   }
   results.sort((a, b) => lowRank(corpus, a.doc) - lowRank(corpus, b.doc) ||
     b.score - a.score || a.doc - b.doc);
@@ -402,6 +462,11 @@ function gameCard(r, terms, g) {
   const cast = g.tbl.cast[g.cols[3][r.doc]];
   if (cast) { const d = el("span", "cast", "在场：" + cast); d.title = cast; meta.append(d); }
   meta.append(el("span", "score", "得分 " + r.score.toFixed(1)));
+  if (r.demoted) {
+    const d = el("span", "src", "（疑似跨词拼接命中，已降权）");
+    d.title = "查询词在文中由相邻两词的尾首拼成（如「警长|正在」含「长正」），按语料字对频率降权";
+    meta.append(d);
+  }
   card.append(meta);
   const body = el("div", "body");
   highlightInto(body, text, terms, text.length > 400 ? 200 : 0);

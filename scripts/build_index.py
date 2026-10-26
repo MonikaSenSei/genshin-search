@@ -320,6 +320,36 @@ def main():
               qc.execute("SELECT id, source, speaker FROM qe")}
         print(f"  qe provenance map: {len(qe)} ids")
 
+    dev_name = re.compile(
+        r"\$UNRELEASED|\$HIDDEN|[（(]\s*(?:test|hide)\s*[)）]"
+        r"|(?:^|[\s\-])test", re.I)
+
+    # Reminder rows (调查短句): the game attributes each line to a speaking
+    # character (avatar + name; the field keys are obfuscated 11-letter
+    # names). Use that as a coarse but real provenance: 讲述人「恰斯卡」.
+    rem_speaker = {}
+    rp = os.path.join(ebi, "ReminderExcelConfigData.json")
+    if os.path.exists(rp):
+        rrows = json.load(open(rp, encoding="utf-8"))
+        ok_name = re.compile(r"^[一-鿿A-Za-z0-9「」·.]{1,14}$")
+        for row in rrows:
+            if not isinstance(row, dict):
+                continue
+            name = None
+            for k, v in row.items():
+                if isinstance(v, int) and re.fullmatch(r"[A-Z]{11}", k):
+                    t = tm.get(str(v))
+                    if t and ok_name.match(t) \
+                            and not dev_name.search(t) and t not in ("？？？", "杂兵"):
+                        name = t
+                        break
+            if not name:
+                continue
+            for v in row.values():
+                if isinstance(v, int) and v in tm_keys and str(v) != str(row.get("id")):
+                    rem_speaker[v] = name
+        print(f"  reminder 讲述人 map: {len(rem_speaker)} ids")
+
     # 1) TextMap ids referenced by story tables
     dev_marker = re.compile(
         r"\$UNRELEASED|\$HIDDEN|[（(]\s*(?:test|hide)\s*[)）]"
@@ -408,7 +438,12 @@ def main():
             # Chinese-shaped provenance; when nothing is known emit 出处未定 —
             # the card's type tag already names the class, an English class
             # code adds nothing (user rule: no internal codes)
-            src = proven_join(classes, labels, mid) or "出处未定"
+            src = proven_join(classes, labels, mid)
+            if not src and "reminder" in classes and mid in rem_speaker:
+                # coarse but real: the game shows these lines with that
+                # character's portrait — 讲述人 is the honest aggregate label
+                src = f"讲述人「{rem_speaker[mid]}」"
+            src = src or "出处未定"
         emit("textmap:" + ",".join(classes), text, src, spk, cast)
 
     # 2) orphan story-looking text (QE-script dialogue etc.). The qe map

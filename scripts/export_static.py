@@ -329,14 +329,32 @@ def main():
     print(f"doc jump URLs: {len(doc_url)} (viewpoints)")
 
     blob, off_bytes = build_blob(texts)
+    # Character-pair frequencies (both CJK) ship so the browser can demote
+    # cross-word glue hits: 警长|正在 contains 长正, but the pair 正在 is
+    # ~20x more frequent than the query term itself (user rule 2026-10:
+    # name queries must not be topped by word-boundary accidents).
+    pair_cnt = {}
+    for t in texts:
+        n = len(t)
+        for i in range(n - 1):
+            a, b = t[i], t[i + 1]
+            ca, cb = ord(a), ord(b)
+            if 0x4E00 <= ca <= 0x9FFF and 0x4E00 <= cb <= 0x9FFF:
+                k = ca << 16 | cb
+                pair_cnt[k] = pair_cnt.get(k, 0) + 1
+    bg_pairs = sorted(k for k, c in pair_cnt.items() if c >= 20)
+    bg_counts = [min(65535, pair_cnt[k]) for k in bg_pairs]
+    bg_bytes = (struct.pack(f"<{len(bg_pairs)}I", *bg_pairs)
+                + struct.pack(f"<{len(bg_counts)}H", *bg_counts))
+    print(f"char-pair table: {len(bg_pairs)} pairs (count>=20), {len(bg_bytes)/1024:.0f} KB")
     cols = [col_bytes(ty, "B"), col_bytes(src, "H"), col_bytes(spk, "H"),
             col_bytes(cast, "H")]
-    lens = [len(off_bytes), len(blob)] + [len(c) for c in cols]
+    lens = [len(off_bytes), len(blob)] + [len(c) for c in cols] + [len(bg_bytes)]
     header = {"n": len(texts), "lens": lens, "ty": ty_tbl, "src": src_tbl,
               "spk": spk_tbl, "cast": cast_tbl, "src_url": src_url,
-              "doc_url": doc_url}
+              "doc_url": doc_url, "bgN": len(bg_pairs)}
     sizes = write_gz(os.path.join(OUT, "genshin.bin.gz"),
-                     pack_bin(header, [off_bytes, blob] + cols))
+                     pack_bin(header, [off_bytes, blob] + cols + [bg_bytes]))
     print(f"genshin.bin: {', '.join(f'{os.path.basename(k)} {v/1e6:.2f} MB' for k, v in sizes.items())} ({len(texts)} docs, blob {len(blob)/1e6:.1f} MB)")
 
     sdb = sqlite3.connect(os.path.join(ROOT, "index", "social.db"))
