@@ -133,7 +133,7 @@ function findDocs(corpus, term, hits, quality) {
     let s = hits.get(d); if (!s) hits.set(d, s = new Set());
     s.add(term);
     if (!quality.has(d)) quality.set(d, new Map());
-    if (!quality.get(d).has(term)) quality.get(d).set(term, { clean: false, maxLeft: 0, maxRight: 0 });
+    if (!quality.get(d).has(term)) quality.get(d).set(term, { clean: false, maxGlue: 0 });
     return quality.get(d).get(term);
   };
   let pos = blob.indexOf(term);
@@ -151,9 +151,9 @@ function findDocs(corpus, term, hits, quality) {
       } else if (term.length > 1 && corpus.bg) {
         // >>>0: JS bitwise ops are signed int32; pair keys are unsigned
         const lf = corpus.bg.get((prevC << 16 | term.charCodeAt(0)) >>> 0) || 0;
-        if (lf > st.maxLeft) st.maxLeft = lf;
+        if (lf > st.maxGlue) st.maxGlue = lf;
         const rf = corpus.bg.get((term.charCodeAt(term.length - 1) << 16 | nextC) >>> 0) || 0;
-        if (rf > st.maxRight) st.maxRight = rf;
+        if (rf > st.maxGlue) st.maxGlue = rf;
       } else {
         st.clean = true;
       }
@@ -174,11 +174,12 @@ function findDocs(corpus, term, hits, quality) {
     }
   }
   if (corpus.bg && term.length > 1) {
+    // one strong side is enough (擅长|正向思考 — 正向 itself is not a bigram);
+    // safety nets: glue pair must itself be a real common word (>=300) and
+    // the query term must be 3x rarer than the glue it accidentally forms
     for (const [d, m] of quality) {
       const st = m.get(term);
-      const glue = Math.max(st && st.maxLeft || 0, st && st.maxRight || 0);
-      if (st && !st.clean && st.maxLeft >= 20 && st.maxRight >= 150 &&
-          occ <= 0.3 * glue) dem.add(d);
+      if (st && !st.clean && st.maxGlue >= 300 && occ <= 0.3 * st.maxGlue) dem.add(d);
     }
   }
   return { df: docs.size, occ, dem };
