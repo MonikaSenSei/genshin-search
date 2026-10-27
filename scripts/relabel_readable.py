@@ -103,6 +103,27 @@ def classify(text):
     return "杂记"
 
 
+def fuzzy_story_match(npart, istories):
+    """Best-effort set join when exact containment fails: fraction of the
+    part's chars covered by matching blocks against each OBC story."""
+    if len(npart) < 30:
+        return None
+    from difflib import SequenceMatcher
+    best, best_cov = None, 0.0
+    for st, setname in istories.items():
+        sm = SequenceMatcher(None, npart, st, autojunk=False)
+        # ratio() is symmetric over both strings, so a full cover of the
+        # short part inside a long story has ratio ~ 2*Lp/(Lp+Ls); gate on
+        # that converted bound instead of a flat 0.85.
+        gate = 2 * 0.85 * len(npart) / (len(npart) + len(st))
+        if sm.real_quick_ratio() < gate or sm.quick_ratio() < gate:
+            continue
+        cov = sum(b.size for b in sm.get_matching_blocks()) / len(npart)
+        if cov > best_cov:
+            best, best_cov = setname, cov
+    return best if best_cov >= 0.85 else None
+
+
 def main():
     rd = os.path.join(REPO, "Readable", "CHS")
     wnames = weapon_names()
@@ -167,6 +188,11 @@ def main():
                     if npart in st:
                         hit = setname
                         break
+            if hit is None:
+                # OBC wiki text differs from game dump by variant/revision
+                # glyphs (櫻/樱, 虛/虚, single-char edits). Exact containment
+                # breaks on one char; fall back to char-coverage ratio.
+                hit = fuzzy_story_match(npart, istories)
             if hit:
                 out[base] = {"label": f"物品故事:{hit}", "ctype": "flavor",
                              "url": iurls.get(norm(hit), "")}
