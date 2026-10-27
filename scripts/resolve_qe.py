@@ -160,6 +160,24 @@ def main():
         if isinstance(row, dict) and isinstance(row.get("ActivityId"), int) \
                 and isinstance(row.get("NameTextMapHash"), int):
             act_name[row["ActivityId"]] = row["NameTextMapHash"]
+    # 2026 dump: ActivityExcelConfigData is a stub (2 rows). The real
+    # per-patch activity name table is NewActivityExcelConfigData
+    # (activityId -> nameTextMapHash); tab labels live in
+    # NewActivityEntryConfigData. Both share one id space with the
+    # QUEST_COND_ACTIVITY_CLIENT_COND / ITEM_GIVING_ACTIVED params.
+    for part in ("NewActivityExcelConfigData.json",
+                 "NewActivityEntryConfigData.json"):
+        p = os.path.join(args.repo, "ExcelBinOutput", part)
+        if not os.path.exists(p):
+            continue
+        for row in load_json(p):
+            if not isinstance(row, dict):
+                continue
+            aid = row.get("activityId", row.get("id"))
+            h = row.get("nameTextMapHash", row.get("tabNameTextMapHash"))
+            if isinstance(aid, int) and isinstance(h, int) \
+                    and aid not in act_name:
+                act_name[aid] = h
     print(f"  activity names: {len(act_name)}")
 
     def speaker_name(t, rid):
@@ -228,8 +246,8 @@ def main():
         if t is None:
             return None
         if dev:
-            return "未上线任务内容" if not t else f"未上线任务「{t}」"
-        return f"{kind_label or '任务'}「{t}」"
+            return "未上线任务内容" if not t else "未上线任务" + brk(t)
+        return f"{kind_label or '任务'}" + brk(t)
 
     def npc_display(h):
         """npc name label text, or None if it is dev/test scaffolding."""
@@ -261,6 +279,32 @@ def main():
                         return t
         return None
 
+    def brk(t):
+        """wrap a title in 「」 without doubling when the stored title/name
+        already embeds brackets (e.g. 「水仙十字大冒险」, NPC 「减七琶音」)."""
+        if "「" in t or "」" in t:
+            return t
+        return "「" + t + "」"
+
+    def id_prefix_quest(idstr):
+        """talk-group / dialog-seq / coop ids encode their owning quest
+        subId: 730379907.json sits under quest 7303799, talk 1203602 under
+        120360, coop 1903110_176 under 190311, seq 3470101 under 347010.
+        Strip 1-3 trailing digits and accept the stem only if the quest
+        table knows that subId (or the stem is itself a main-quest id)."""
+        s = str(idstr)
+        if len(s) < 8:
+            return None
+        for cut in (1, 2, 3):
+            if len(s) - cut < 6:
+                continue
+            qid = int(s[:-cut])
+            if qid in sub2main:
+                return qid
+            if len(s) >= 10 and qid in main_title:
+                return qid
+        return None
+
     def ctx_label(kind, cid):
         if kind == "Quest" and cid == "GlobalDialog":
             return "任务通用对白"
@@ -276,11 +320,11 @@ def main():
         if kind in ("Npc", "NpcOther") and cid.isdigit() and int(cid) in npc_name:
             t = npc_display(npc_name[int(cid)])
             if t:
-                return f"NPC对话「{t}」"
+                return "NPC对话" + brk(t)
         if kind == "NpcGroup" and cid.isdigit() and int(cid) in npc_name:
             t = npc_display(npc_name[int(cid)])
             if t:
-                return f"NPC对话组「{t}」"
+                return "NPC对话组" + brk(t)
         row = talk_reg.get(int(cid)) if cid.isdigit() else None
         if isinstance(row, dict):
             if kind in ("Npc", "NpcGroup", "NpcOther"):
@@ -289,23 +333,31 @@ def main():
                 nm = npc_label(row)
                 if nm:
                     kind_lbl = "NPC对话组" if kind == "NpcGroup" else "NPC对话"
-                    return f"{kind_lbl}「{nm}」"
+                    return kind_lbl + brk(nm)
             t = (quest_title(row["questId"])[0]
                  if isinstance(row.get("questId"), int) else None)
             if kind == "Activity":
                 a = act_label(row)
                 if a:
-                    return f"活动「{a}」"
+                    return "活动" + brk(a)
                 if t:
-                    return f"活动任务「{t}」"
+                    return "活动任务" + brk(t)
             if t:
-                return f"{KIND_LABELS.get(kind, kind)}（任务「{t}」）"
+                return f"{KIND_LABELS.get(kind, kind)}（任务" + brk(t) + "）"
             nm = npc_label(row)
             if nm and kind in ("FreeGroup", "NpcOther", "Gadget", "GadgetGroup"):
-                return f"{KIND_LABELS.get(kind, kind)}「{nm}」"
+                return KIND_LABELS.get(kind, kind) + brk(nm)
             cq = cond_quest(row)
             if cq:
-                return f"{KIND_LABELS.get(kind, kind)}（任务「{cq}」）"
+                return f"{KIND_LABELS.get(kind, kind)}（任务" + brk(cq) + "）"
+        # id-prefix fallback: group/seq ids that embed a known quest subId
+        pq = id_prefix_quest(cid.split("_")[0]) if cid.isdigit() or "_" in cid else None
+        if pq is not None:
+            t, dev = quest_title(pq)
+            if t is not None:
+                if dev:
+                    return f"{KIND_LABELS.get(kind, kind)}｜未上线任务" + brk(t)
+                return f"{KIND_LABELS.get(kind, kind)}（任务" + brk(t) + "）"
         return f"{KIND_LABELS.get(kind, kind)}#{cid}"
 
     # 3) walk Talk tree
@@ -353,6 +405,37 @@ def main():
                 elif isinstance(o, list):
                     stack.extend(o)
         print(f"  {kind}: total files so far {files}", flush=True)
+
+    # 3b) DialogExcelConfigData: the dialogue-sequence layer (cutscene/popup
+    # lines with no Talk-file reference). Seq ids carry the owning quest
+    # prefix; label honestly as 剧情对白, never a bare quest claim.
+    dpath = os.path.join(args.repo, "ExcelBinOutput",
+                         "DialogExcelConfigData.json")
+    if os.path.exists(dpath):
+        n_seq = 0
+        for row in load_json(dpath):
+            if not isinstance(row, dict):
+                continue
+            h = row.get("talkContentTextMapHash")
+            m = is_tm_id(h, tm_keys) if isinstance(h, int) else None
+            if m is None:
+                continue
+            label = "剧情对白"
+            pq = id_prefix_quest(row.get("GFLDJMJKIKE"))
+            if pq is not None:
+                t, dev = quest_title(pq)
+                if t is not None:
+                    if dev:
+                        label = "剧情对白｜未上线任务" + brk(t)
+                    else:
+                        label = "剧情对白（任务" + brk(t) + "）"
+            spk = ""
+            role = row.get("talkRole")
+            if isinstance(role, dict):
+                spk = speaker_name(role.get("type", ""), str(role.get("id", "")))
+            hits[m].append((7, label, spk))
+            n_seq += 1
+        print(f"  dialog-seq rows matched: {n_seq}")
 
     # 4) aggregate + write
     print(f"walked {files} files; matched {len(hits)} textmap ids")
@@ -411,7 +494,7 @@ def main():
             for num in re.findall(r"\d{4,}", stem):
                 t, dev = quest_title(int(num))
                 if t is not None:
-                    src = ("未上线任务「%s」" % t) if dev else f"任务「{t}」"
+                    src = ("未上线任务" + brk(t)) if dev else "任务" + brk(t)
                     resolved = f"过场字幕（{src}）"
                     break
             if resolved:
