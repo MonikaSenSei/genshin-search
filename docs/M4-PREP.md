@@ -132,6 +132,14 @@ build_index：scan_table 增加 codex_names（descTextMapHash→name），label_
 实测（重跑 resolve_qe + build_index，旧库备份 genshin.db.bak-2026-10-27a）：qe 表 349,193→350,068 行，带具体出处 91.7%→93.7%（+7,697 条）；索引带具体标题标签文档 307,984→312,541（+4,557），出处未定仍 25,452（6.6%，构成=通用池/无名物件/系统文本）。活动对话#N 4,544→1,028、多人任务对话 -4,945（转真名）、自由对话组#N -903、任务通用对白 -3,338（多获得活动互证标签）；875 条新文本经文本去重并入既有文档、补上出处。抽查：托马找人→自由对话组（任务「定罪公文」）、203 条 剧情对白（任务「为了一切向往生命的孩子们」）等全部语义吻合。
 剩余 6.6% 的诚实上限：任务通用对白（按设计无唯一归属）、物件对话 899 文件（dump 无任何表引用其 id）、Blossom 组 cityId 无城市名表、故事板 164 文件无连接。
 
+## M4.15 会话上下文拼接（2026-10-27，本地）
+用户要求"把上下文连起来"：搜索结果卡片新增「展开对话上下文」。Talk 树元素 GLJCECCOEDP=下一句列表，顺单子链走即是游戏内播放顺序；分支点（玩家选项）终止一段并记 branch 标志。
+scripts/build_conversations.py：走全部 Talk 文件，单子链≥4 句成段（含每句说话人，NpcExcel 名+dev 名过滤，PLAYER→旅行者、NARRATOR→旁白）→ index/conversations.db（seq 表 + text→(seq,pos) map）。实测 17,548 段 / 189,268 句 / 167,688 去重文本，join 到索引 149,571 篇（39%，全部为任务/活动/闲聊类文本）。
+export_static：doc→(seq,pos) 不再进 genshin.bin（试加列 +0.9MB 被否——首屏性能优先），改独立 data/conv-index.bin（排序 uint32 三元组，zst 705KB，首访二分查找）；会话正文按 400 段/块切到 data/conv/<n>.json(.zst|.gz)+同名 .meta.json（分支标志），共 44 块 11MB，点击才拉取。genshin.bin 保持 .zst 11.85MB。
+前端 app.js：renderGame 异步化→首屏后 lazy ensureConvIdx；gameCard 有映射才出「展开对话上下文」按钮；面板按顺序渲染说话人行、命中句高亮（conv-here）、分支尾注「（对话到此结束后仍有分支选项未展开）」，再点收起。
+实测（浏览器本地预览）：烟绯/萍姥姥「磬弦奏华夜」8 句按播放顺序+高亮正确；伯恩哈德「店主考核」12 句带分支注；折叠/展开切换正常；node --check / py_compile 全过。
+已知边界：一行文本只在多段会话中时挂第一段（map 先到先得）；分支只标"此处有未展开选项"，不展开备选分支（v2 可做）；短行(<4字)不入段；39% 是可 join 上限（其余文本不属于任何已命名会话）。cron 步骤6=仅语料版本重建日后重跑 build_conversations.py，步骤7=export 含 conv 文件一并 git push。
+
 ## （旧计划存档）观测枢接入预案
 跳转原文 + 书名接回的源改为**观测枢 Wiki**（米游社原神版块→观测·Wiki，https://baike.mihoyo.com/ys/obc/ ，官方托管+玩家协作，国内直连实测 200）。已验证：搜「野猪公主」有词条，URL 形态 `baike.mihoyo.com/ys/obc/content/<数字id>/detail`（注意是数字 ID，非书名 slug）。步骤：
 1. 找它的搜索/分类数据接口（页面是 SPA，HTML 全是壳；search 接口和书籍分类目录接口待逆向）。

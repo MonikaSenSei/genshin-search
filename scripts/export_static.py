@@ -74,6 +74,41 @@ def write_gz(path, data):
     return sizes
 
 
+CONV_CHUNK = 400  # conversations per lazily-loaded chunk file
+
+
+def write_conv_chunks(bodies, branch_flags):
+    """web/data/conv/<n>.json[.gz|.zst] — JSON array of conversation bodies,
+    array index = seqId - first seq in the chunk (contiguous ids);
+    <n>.meta.json carries the parallel branch flags."""
+    outdir = os.path.join(OUT, "conv")
+    os.makedirs(outdir, exist_ok=True)
+    ids = sorted(bodies)
+    chunks = 0
+    for start in range(0, ids[-1] + 1, CONV_CHUNK) if ids else []:
+        present = [s for s in range(start, min(start + CONV_CHUNK, ids[-1] + 1)) if s in bodies]
+        if not present:
+            continue
+        raw = "[" + ",".join(bodies[s] for s in present) + "]"
+        write_gz(os.path.join(outdir, f"{chunks}.json.gz"), raw.encode("utf-8"))
+        meta = [branch_flags.get(s, 0) for s in present]
+        write_gz(os.path.join(outdir, f"{chunks}.meta.json.gz"),
+                 json.dumps(meta).encode("utf-8"))
+        chunks += 1
+    return chunks
+
+
+def write_conv_index(doc_pairs):
+    """data/conv-index.bin — sorted uint32 triples (docIdx, seq, pos);
+    the browser binary-searches docIdx on first 展开对话上下文 click, so the
+    mapping costs nothing on first load."""
+    raw = struct.pack(f"<{3 * len(doc_pairs)}I",
+                      *[v for tri in doc_pairs for v in tri])
+    sizes = write_gz(os.path.join(OUT, "conv-index.bin.gz"), raw)
+    print(f"conv-index: {len(doc_pairs)} docs, "
+          f"{', '.join(f'{os.path.basename(k)} {v/1e3:.0f} KB' for k, v in sizes.items())}")
+
+
 def export_items():
     """M4.7 items layer: OBC item entries -> items.bin (plain JSON array,
     gz/zst dual-format; fetched by the same fetchDecompressed path).
@@ -196,6 +231,9 @@ def main():
         "SELECT body, corpus_type, source, speaker, \"cast\" FROM docs ORDER BY rowid"
     ).fetchall()
     texts = [r[0] for r in rows]
+    text_idx = {}
+    for i, t in enumerate(texts):
+        text_idx.setdefault(t, i)
     ty_tbl, ty = table_write(r[1] for r in rows)
     src_tbl, src = table_write(r[2] for r in rows)
     spk_tbl, spk = table_write(r[3] for r in rows)
@@ -328,6 +366,30 @@ def main():
                 doc_url[str(i)] = e["url"]
     print(f"doc jump URLs: {len(doc_url)} (viewpoints)")
 
+    # ---- conversation context layer (scripts/build_conversations.py) ----
+    # per-doc (seq, pos) so a result card can offer 展开对话上下文; chunk
+    # files carry the actual line+speaker sequences and load lazily on click.
+    bodies = {}
+    branch_flags = {}
+    doc_pairs = []
+    cdb_path = os.path.join(ROOT, "index", "conversations.db")
+    if os.path.exists(cdb_path):
+        cdb = sqlite3.connect(cdb_path)
+        for t, s, pos in cdb.execute("SELECT text, seq, pos FROM map"):
+            i = text_idx.get(t)
+            if i is not None and pos < 65535:
+                doc_pairs.append((i, s, pos))
+        doc_pairs.sort()
+        for sid, body, br in cdb.execute("SELECT id, body, branch FROM seq"):
+            bodies[sid] = body
+            branch_flags[sid] = br
+        n_chunk = write_conv_chunks(bodies, branch_flags)
+        write_conv_index(doc_pairs)
+    else:
+        n_chunk = 0
+    print(f"conversation layer: {len(doc_pairs)} docs -> "
+          f"{len(bodies)} sequences in {n_chunk} chunks")
+
     blob, off_bytes = build_blob(texts)
     # Character-pair frequencies (both CJK) ship so the browser can demote
     # cross-word glue hits: 警长|正在 contains 长正, but the pair 正在 is
@@ -352,7 +414,9 @@ def main():
     lens = [len(off_bytes), len(blob)] + [len(c) for c in cols] + [len(bg_bytes)]
     header = {"n": len(texts), "lens": lens, "ty": ty_tbl, "src": src_tbl,
               "spk": spk_tbl, "cast": cast_tbl, "src_url": src_url,
-              "doc_url": doc_url, "bgN": len(bg_pairs)}
+              "doc_url": doc_url, "bgN": len(bg_pairs),
+              "convChunk": CONV_CHUNK, "convChunks": n_chunk,
+              "convN": len(doc_pairs)}
     sizes = write_gz(os.path.join(OUT, "genshin.bin.gz"),
                      pack_bin(header, [off_bytes, blob] + cols + [bg_bytes]))
     print(f"genshin.bin: {', '.join(f'{os.path.basename(k)} {v/1e6:.2f} MB' for k, v in sizes.items())} ({len(texts)} docs, blob {len(blob)/1e6:.1f} MB)")

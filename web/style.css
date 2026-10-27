@@ -32,7 +32,15 @@ h3 { font-size: 14px; color: var(--acc); margin: 16px 0 8px; }
 .title-line { font-weight: 600; margin-bottom: 4px; }
 mark { background: var(--mark); color: var(--acc); padding: 0 2px; border-radius: 3px; }
 .via { margin-top: 8px; font-size: 12px; color: var(--dim); }
-.link { color: #6aa3d4; font-size: 13px; }
+.link { color: #6aa3d4; font-size: 13px; cursor: pointer; }
+link { color: #6aa3d4; font-size: 13px; cursor: pointer; }
+.conv { margin-top: 10px; border-left: 3px solid var(--acc); padding: 4px 0 4px 10px; }
+.conv-h { font-size: 12px; color: var(--dim); margin-bottom: 6px; }
+.conv-line { margin: 3px 0; line-height: 1.5; }
+.conv-spk { color: #7fb069; font-size: 13px; }
+.conv-here { background: rgba(114, 139, 213, 0.13); border-radius: 4px; padding: 2px 4px; }
+.conv-note { font-size: 12px; color: var(--dim); margin-top: 6px; }
+
 footer { max-width: 880px; margin: 0 auto; padding: 16px 20px 40px;
   color: var(--dim); font-size: 12px; border-top: 1px solid var(--border); }
 

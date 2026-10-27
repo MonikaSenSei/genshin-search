@@ -90,7 +90,15 @@ async function loadGame(onProgress) {
     bg = new Map();
     for (let i = 0; i < n; i++) bg.set(pairs[i], counts[i]);
   }
-  state.g = { n: header.n, offs, blob, cols, tbl: header, bg };
+  // conversation context columns (M4.15): doc -> (seq, pos); chunk files
+  // data/conv/<n>.json[.zst|.gz] hold [[speaker, line], ...] arrays and
+  // load lazily when a card expands its dialogue.
+  let cv = null;
+  if (header.convChunk > 0 && header.convN > 0) {
+    cv = { chunk: header.convChunk, nChunks: header.convChunks,
+           n: header.convN, idx: null, files: new Map() };
+  }
+  state.g = { n: header.n, offs, blob, cols, cv, tbl: header, bg };
 }
 
 async function loadSocial(onProgress) {
@@ -436,7 +444,7 @@ function renderItemsSection(q) {
   box.append(grid);
 }
 
-function renderGame(results, terms) {
+async function renderGame(results, terms) {
   const box = document.getElementById("strong");
   const weakBox = document.getElementById("weak");
   box.replaceChildren(); weakBox.replaceChildren();
@@ -449,6 +457,7 @@ function renderGame(results, terms) {
     if (seenBodies.has(text)) return false;
     seenBodies.add(text); return true;
   });
+  if (g.cv && !g.cv.idx) { try { await ensureConvIdx(g.cv); } catch (e) { g.cv = null; } }
   const strong = dedup(results.filter((r) => r.strong)).slice(0, 50);
   const weakAll = results.filter((r) => !r.strong);
   const weak = dedup(weakAll).slice(0, 15);
@@ -459,6 +468,24 @@ function renderGame(results, terms) {
     weakBox.append(note);
     for (const r of weak) weakBox.append(gameCard(r, terms, g));
   }
+}
+
+async function ensureConvIdx(cv) {
+  if (cv.idx) return cv.idx;
+  const bytes = await fetchDecompressed("data/conv-index.bin");
+  cv.idx = new Uint32Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+  return cv.idx;
+}
+
+function convLookup(idx, doc) {
+  // flat sorted triples (doc, seq, pos); binary search on doc
+  let lo = 0, hi = idx.length / 3 - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1, d = idx[mid * 3];
+    if (d === doc) return { seq: idx[mid * 3 + 1], pos: idx[mid * 3 + 2] };
+    if (d < doc) lo = mid + 1; else hi = mid - 1;
+  }
+  return null;
 }
 
 function gameCard(r, terms, g) {
@@ -485,6 +512,57 @@ function gameCard(r, terms, g) {
   card.append(body);
   const via = el("div", "via", "命中词：" + r.via.join("、"));
   card.append(via);
+  const cv = g.cv;
+  const cvHit = cv && cv.idx ? convLookup(cv.idx, r.doc) : null;
+  if (cvHit) {
+    const link = el("a", "link", "展开对话上下文");
+    link.href = "javascript:void(0)";
+    const panel = el("div", "conv");
+    panel.hidden = true;
+    link.addEventListener("click", async () => {
+      if (!panel.hidden) { panel.hidden = true; link.textContent = "展开对话上下文"; return; }
+      if (!panel.dataset.built) {
+        link.textContent = "载入中…";
+        try {
+          const seq = cvHit.seq;
+          const c = Math.floor(seq / cv.chunk);
+          let chunkArr = cv.files.get(c);
+          if (!chunkArr) {
+            const [bytes, mbytes] = await Promise.all([
+              fetchDecompressed(`data/conv/${c}.json`),
+              fetchDecompressed(`data/conv/${c}.meta.json`).catch(() => null)]);
+            chunkArr = JSON.parse(new TextDecoder("utf-8").decode(bytes));
+            chunkArr.meta = mbytes ? JSON.parse(new TextDecoder("utf-8").decode(mbytes)) : [];
+            cv.files.set(c, chunkArr);
+          }
+          const conv = chunkArr[seq - c * cv.chunk];
+          panel.dataset.built = "1";
+          link.textContent = "收起对话上下文";
+          panel.append(el("div", "conv-h", "对话上下文 · " + conv.length + " 句（出处见上方标签）"));
+          for (let i = 0; i < conv.length; i++) {
+            const [sp, t] = conv[i];
+            const row = el("div", "conv-line" + (i === cvHit.pos ? " conv-here" : ""));
+            if (sp) row.append(el("span", "conv-spk", sp + "："));
+            const bodySpan = el("span", "conv-txt");
+            highlightInto(bodySpan, t, terms, t.length > 400 ? 200 : 0);
+            row.append(bodySpan);
+            panel.append(row);
+          }
+          if (chunkArr.meta[seq - c * cv.chunk]) {
+            panel.append(el("div", "conv-note", "（对话到此结束后仍有分支选项未展开）"));
+          }
+        } catch (e) {
+          link.textContent = "对话载入失败";
+          return;
+        }
+      } else {
+        link.textContent = "收起对话上下文";
+      }
+      panel.hidden = false;
+    });
+    card.append(link);
+    card.append(panel);
+  }
   return card;
 }
 
@@ -530,7 +608,7 @@ async function runSearch(rawQ) {
   if (state.items == null) await loadItems();
   renderItemsSection(q);
   const { results, weights } = searchCorpus(state.g, terms, q);
-  renderGame(results, terms);
+  await renderGame(results, terms);
   const soc = searchCorpus(state.s, [q], q);
   renderSocial(soc.results);
   const known = terms.length > 1;
